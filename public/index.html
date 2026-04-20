@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#007AFF" />
+  <meta name="description" content="MyVault — Smart Personal Finance" />
+  <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
+  <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Plus Jakarta Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica Neue', 'sans-serif'],
+          },
+          colors: {
+            // iOS-inspired blue replaces the old green "money" theme
+            money: {
+              50:  '#EFF6FF',
+              100: '#DBEAFE',
+              200: '#BFDBFE',
+              300: '#93C5FD',
+              600: '#007AFF',   // iOS Blue — primary action color
+              700: '#0065D1',
+              800: '#0052A8',
+              900: '#003F80',
+            },
+            // iOS system palette
+            bank: {
+              50:  '#F2F2F7',   // iOS system grouped background
+              100: '#FFFFFF',   // card / sheet surface
+              500: '#8E8E93',   // secondary label
+              900: '#1C1C1E',   // primary label
+            },
+          }
+        }
+      }
+    }
+  </script>
+  <title>MyVault — Smart Finance</title>
+</head>
+<body>
+  <noscript>You need to enable JavaScript to run this app.</noscript>
+  <div id="root"></div>
+</body>
+</html>

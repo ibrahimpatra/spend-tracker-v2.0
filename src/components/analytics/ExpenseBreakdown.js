@@ -1,74 +1,55 @@
 import React from 'react';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
 
-// iOS-compatible vibrant palette
-const PALETTE = [
-  '#007AFF', '#34C759', '#FF9500', '#FF3B30',
-  '#AF52DE', '#5AC8FA', '#FF2D55', '#FFCC00',
-];
+const PALETTE = ['#2563EB','#059669','#DC2626','#D97706','#7C3AED','#DB2777','#0891B2','#65A30D'];
 
-const CustomTooltip = ({ active, payload }) => {
+const Tip = ({ active, payload }) => {
   if (!active || !payload?.length) return null;
-  const d = payload[0];
   return (
-    <div className="bg-white px-3 py-2 rounded-xl shadow-lg border border-gray-100 text-xs">
-      <p className="font-bold text-bank-900">{d.name}</p>
-      <p className="text-bank-500 mt-0.5">
-        {d.value.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-      </p>
+    <div style={{ background:'var(--c-surface)', border:'1px solid var(--c-border)', borderRadius:'var(--r-md)', padding:'6px 10px', boxShadow:'var(--shadow-md)', fontSize:11 }}>
+      <p style={{ margin:0, fontWeight:700, color:'var(--c-text-1)' }}>{payload[0].name}</p>
+      <p style={{ margin:'2px 0 0', color:'var(--c-text-3)' }}>{payload[0].value.toLocaleString(undefined,{minimumFractionDigits:2})}</p>
     </div>
   );
 };
 
-export default function ExpenseBreakdown({ data }) {
-  if (!data || data.length === 0) {
-    return (
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 h-full flex flex-col">
-        <h3 className="font-bold text-bank-900 mb-1">Expenses</h3>
-        <div className="flex-1 flex items-center justify-center text-bank-500 text-sm">
-          No expenses this period
-        </div>
-      </div>
-    );
-  }
+export default function ExpenseBreakdown({ data, compact }) {
+  if (!data?.length) return (
+    <div className="card" style={{ padding:'12px 14px', height:'100%', display:'flex', flexDirection:'column' }}>
+      <h4 style={{ margin:'0 0 8px', fontSize:12, fontWeight:700, color:'var(--c-text-1)' }}>Expenses</h4>
+      <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', fontSize:11, color:'var(--c-text-4)' }}>No expenses this period</div>
+    </div>
+  );
 
-  const total = data.reduce((sum, d) => sum + d.value, 0);
-  const sorted = [...data].sort((a, b) => b.value - a.value);
+  const total  = data.reduce((s,d) => s+d.value, 0);
+  const sorted = [...data].sort((a,b) => b.value - a.value);
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex flex-col h-full">
-      <h3 className="font-bold text-bank-900 mb-4">Expenses by Category</h3>
-
-      <div className="flex items-center gap-4 flex-1 min-h-0">
-        {/* Donut */}
-        <div className="w-28 h-28 flex-shrink-0">
+    <div className="card" style={{ padding:'12px 14px', height:'100%', display:'flex', flexDirection:'column' }}>
+      <h4 style={{ margin:'0 0 8px', fontSize:12, fontWeight:700, color:'var(--c-text-1)' }}>Expenses by Category</h4>
+      <div style={{ display:'flex', alignItems:'center', gap:12, flex:1 }}>
+        <div style={{ width:90, height:90, flexShrink:0 }}>
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
-              <Pie data={sorted} dataKey="value" innerRadius={34} outerRadius={52} paddingAngle={3} startAngle={90} endAngle={-270}>
-                {sorted.map((_, i) => (
-                  <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
-                ))}
+              <Pie data={sorted} dataKey="value" innerRadius={28} outerRadius={42} paddingAngle={3} startAngle={90} endAngle={-270}>
+                {sorted.map((_,i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}
               </Pie>
-              <Tooltip content={<CustomTooltip />} />
+              <Tooltip content={<Tip />} />
             </PieChart>
           </ResponsiveContainer>
         </div>
-
-        {/* Legend */}
-        <div className="flex-1 space-y-2 overflow-hidden">
-          {sorted.slice(0, 6).map((d, i) => {
-            const pct = ((d.value / total) * 100).toFixed(1);
+        <div style={{ flex:1, display:'flex', flexDirection:'column', gap:4, overflow:'hidden' }}>
+          {sorted.slice(0,6).map((d,i) => {
+            const pct = ((d.value/total)*100).toFixed(0);
             return (
-              <div key={i} className="flex items-center gap-2 min-w-0">
-                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: PALETTE[i % PALETTE.length] }} />
-                <span className="text-xs text-bank-900 font-medium truncate flex-1 min-w-0">{d.name}</span>
-                <span className="text-xs text-bank-500 font-semibold flex-shrink-0">{pct}%</span>
+              <div key={i} style={{ display:'flex', alignItems:'center', gap:5 }}>
+                <span style={{ width:6, height:6, borderRadius:'50%', background:PALETTE[i%PALETTE.length], flexShrink:0 }} />
+                <span style={{ fontSize:10, color:'var(--c-text-2)', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{d.name}</span>
+                <span style={{ fontSize:10, fontWeight:700, color:'var(--c-text-3)', flexShrink:0 }}>{pct}%</span>
               </div>
             );
           })}
-          {sorted.length > 6 && (
-            <p className="text-[10px] text-bank-500">+{sorted.length - 6} more categories</p>
-          )}
+          {sorted.length > 6 && <p style={{ margin:0, fontSize:9, color:'var(--c-text-4)' }}>+{sorted.length-6} more</p>}
         </div>
       </div>
     </div>

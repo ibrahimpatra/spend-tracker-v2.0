@@ -1,53 +1,46 @@
 import React from 'react';
 import { CURRENCIES } from '../../constants';
 
-const CARD_STYLES = [
-  // Primary — deep iOS blue gradient
-  { bg: 'bg-gradient-to-br from-[#007AFF] to-[#0047AB]', text: 'text-white', sub: 'text-white/70', shine: true },
-  // Slate dark — for second account
-  { bg: 'bg-gradient-to-br from-[#1C1C1E] to-[#3A3A3C]', text: 'text-white', sub: 'text-white/60', shine: true },
-  // Light blue card
-  { bg: 'bg-white', text: 'text-bank-900', sub: 'text-bank-500', shine: false, border: 'border border-gray-100' },
-  { bg: 'bg-white', text: 'text-bank-900', sub: 'text-bank-500', shine: false, border: 'border border-gray-100' },
+const GRADIENTS = [
+  { bg: 'linear-gradient(135deg, #2563EB 0%, #1e40af 100%)', text: '#fff', sub: 'rgba(255,255,255,0.65)' },
+  { bg: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)', text: '#fff', sub: 'rgba(255,255,255,0.55)' },
+  { bg: '#fff',    border: 'var(--c-border)', text: 'var(--c-text-1)', sub: 'var(--c-text-4)' },
+  { bg: '#F8FAFC', border: 'var(--c-border)', text: 'var(--c-text-1)', sub: 'var(--c-text-4)' },
 ];
 
 export default function BalanceCard({ currency, balance, label, index }) {
-  const style = CARD_STYLES[index] || CARD_STYLES[2];
-  const symbol = CURRENCIES.find(c => c.code === currency)?.symbol || currency;
-  const isNegative = balance < 0;
+  const s   = GRADIENTS[index] || GRADIENTS[2];
+  const sym = CURRENCIES.find(c => c.code === currency)?.symbol || currency;
+  const neg = balance < 0;
+  const isColoured = index < 2;
 
   return (
-    <div className={`relative p-5 rounded-2xl shadow-sm overflow-hidden transition-transform active:scale-[0.98] cursor-default select-none ${style.bg} ${style.border || ''}`}>
-
-      {/* Shine / gloss effect for colored cards */}
-      {style.shine && (
-        <div className="absolute -top-10 -right-10 w-32 h-32 rounded-full bg-white opacity-10 blur-2xl pointer-events-none" />
+    <div style={{
+      borderRadius: 'var(--r-xl)', padding: '12px 14px',
+      background: s.bg, border: s.border ? `1px solid ${s.border}` : 'none',
+      boxShadow: isColoured ? '0 4px 14px rgba(37,99,235,0.25)' : 'var(--shadow-xs)',
+      position: 'relative', overflow: 'hidden',
+      transition: 'transform 0.15s',
+    }}
+      onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-1px)'}
+      onMouseLeave={e => e.currentTarget.style.transform = 'none'}
+    >
+      {isColoured && (
+        <div style={{ position:'absolute', top:-20, right:-20, width:80, height:80, borderRadius:'50%', background:'rgba(255,255,255,0.07)', pointerEvents:'none' }} />
       )}
-      {style.shine && (
-        <div className="absolute bottom-0 left-0 w-full h-1/2 bg-black/10 pointer-events-none" />
-      )}
-
-      <div className="relative z-10 flex flex-col gap-3">
-        {/* Label row */}
-        <div className="flex items-center justify-between">
-          <span className={`text-xs font-semibold uppercase tracking-wider ${style.sub}`}>
+      <div style={{ position:'relative' }}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:6 }}>
+          <span style={{ fontSize:9, fontWeight:700, color:s.sub, textTransform:'uppercase', letterSpacing:'0.05em', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth:'70%' }}>
             {label}
           </span>
-          <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
-            style.shine ? 'bg-white/20 text-white' : 'bg-gray-100 text-bank-500'
-          }`}>
+          <span style={{ fontSize:9, fontWeight:700, color:s.sub, background:'rgba(255,255,255,0.15)', padding:'1px 5px', borderRadius:'var(--r-full)', border: isColoured ? '1px solid rgba(255,255,255,0.2)' : '1px solid var(--c-border-light)' }}>
             {currency}
           </span>
         </div>
-
-        {/* Balance */}
-        <div className={`text-2xl font-extrabold tracking-tight ${style.text} ${isNegative ? 'text-red-300' : ''}`}>
-          {isNegative ? '-' : ''}{symbol}{Math.abs(balance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-        </div>
-
-        <div className={`text-[11px] font-medium ${style.sub}`}>
-          Current Balance
-        </div>
+        <p style={{ margin:0, fontSize:20, fontWeight:800, letterSpacing:-0.5, color: neg ? (isColoured ? '#fca5a5' : 'var(--c-danger)') : s.text }}>
+          {neg ? '-' : ''}{sym}{Math.abs(balance).toLocaleString(undefined,{minimumFractionDigits:2})}
+        </p>
+        <p style={{ margin:'3px 0 0', fontSize:9, color:s.sub }}>Current Balance</p>
       </div>
     </div>
   );

@@ -2,17 +2,20 @@ import React, { useState } from 'react';
 import { db } from '../firebase';
 import { collection, addDoc } from 'firebase/firestore';
 import { ICON_SET, SvgIcon } from '../utils/icons';
+import { Modal, Input, Button } from './ui/index';
 
 const PRESET_COLORS = [
-  '#007AFF', '#34C759', '#FF3B30', '#FF9500', '#FFCC00',
-  '#AF52DE', '#FF2D55', '#5AC8FA', '#8E8E93', '#1C1C1E',
+  '#2563EB','#059669','#DC2626','#D97706','#7C3AED',
+  '#DB2777','#0891B2','#65A30D','#EA580C','#475569',
 ];
 
-export default function CategoryForm({ user, type, onSuccess, onCancel }) {
+export default function CategoryForm({ user, type, onSuccess, onCancel, asModal = false }) {
   const [name,    setName]    = useState('');
-  const [color,   setColor]   = useState('#007AFF');
+  const [color,   setColor]   = useState('#2563EB');
   const [icon,    setIcon]    = useState('Shopping');
   const [loading, setLoading] = useState(false);
+
+  const reset = () => { setName(''); setColor('#2563EB'); setIcon('Shopping'); };
 
   const handleSubmit = async () => {
     if (!name.trim()) return;
@@ -20,113 +23,103 @@ export default function CategoryForm({ user, type, onSuccess, onCancel }) {
     try {
       const payload = { name: name.trim(), icon, color, type, userId: user.uid };
       const ref = await addDoc(collection(db, `users/${user.uid}/categories`), payload);
-      if (onSuccess) onSuccess({ id: ref.id, ...payload });
-    } catch (err) {
-      console.error('Error adding category:', err);
-    } finally {
-      setLoading(false);
-    }
+      onSuccess?.({ id: ref.id, ...payload });
+      reset();
+    } catch (err) { console.error(err); }
+    finally { setLoading(false); }
   };
 
+  const body = (
+    <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/* Preview + name */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{
+          width: 40, height: 40, borderRadius: 10, background: color,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          flexShrink: 0, boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+        }}>
+          <SvgIcon name={icon} className="w-5 h-5 text-white" />
+        </div>
+        <Input
+          placeholder="Category name"
+          value={name}
+          onChange={e => setName(e.target.value)}
+          autoFocus
+          className="flex-1"
+        />
+      </div>
+
+      {/* Color presets */}
+      <div>
+        <p style={{ fontSize: 10, fontWeight: 700, color: 'var(--c-text-4)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Color</p>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          {PRESET_COLORS.map(c => (
+            <button key={c} type="button" onClick={() => setColor(c)} style={{
+              width: 22, height: 22, borderRadius: '50%', background: c, border: 'none',
+              cursor: 'pointer', flexShrink: 0, outline: color === c ? `2px solid ${c}` : 'none', outlineOffset: 2,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'transform 0.1s',
+            }}>
+              {color === c && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3"><path d="M5 13l4 4L19 7"/></svg>}
+            </button>
+          ))}
+          {/* Custom */}
+          <div style={{ position: 'relative', width: 22, height: 22, borderRadius: '50%', overflow: 'hidden', border: '1.5px dashed var(--c-border)', cursor: 'pointer', flexShrink: 0 }}>
+            <input type="color" value={color} onChange={e => setColor(e.target.value)}
+              style={{ position: 'absolute', top: -6, left: -6, width: 34, height: 34, cursor: 'pointer', opacity: 0 }} />
+            <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: 'var(--c-text-4)', pointerEvents: 'none' }}>+</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Icon grid */}
+      <div>
+        <p style={{ fontSize: 10, fontWeight: 700, color: 'var(--c-text-4)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Icon</p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 5 }}>
+          {Object.keys(ICON_SET).map(k => (
+            <button key={k} type="button" onClick={() => setIcon(k)} style={{
+              width: '100%', aspectRatio: '1', borderRadius: 8, border: '1px solid',
+              borderColor: icon === k ? color : 'var(--c-border-light)',
+              background: icon === k ? color + '18' : 'var(--c-surface-2)',
+              color: icon === k ? color : 'var(--c-text-3)',
+              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              transition: 'all 0.12s', transform: icon === k ? 'scale(1.06)' : 'none',
+            }}>
+              <SvgIcon name={k} className="w-4 h-4" />
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+
+  if (asModal) {
+    return (
+      <Modal
+        open
+        onClose={onCancel}
+        title={`New ${type === 'expense' ? 'Expense' : 'Income'} Category`}
+        footer={
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Button variant="ghost" block onClick={onCancel}>Cancel</Button>
+            <Button variant="primary" block loading={loading} onClick={handleSubmit} style={{ background: color, borderColor: color }}>
+              Create Category
+            </Button>
+          </div>
+        }
+      >
+        {body}
+      </Modal>
+    );
+  }
+
   return (
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 animate-fade-in-up">
-      <h4 className="font-bold text-bank-900 mb-4">New {type === 'expense' ? 'Expense' : 'Income'} Category</h4>
-
-      <div className="space-y-4">
-        {/* Name + color preview row */}
-        <div className="flex items-center gap-3">
-          {/* Icon preview */}
-          <div
-            className="w-12 h-12 rounded-xl flex items-center justify-center text-white flex-shrink-0 shadow-sm"
-            style={{ backgroundColor: color }}
-          >
-            <SvgIcon name={icon} className="w-6 h-6" />
-          </div>
-          <input
-            type="text"
-            placeholder="Category name"
-            value={name}
-            onChange={e => setName(e.target.value)}
-            className="flex-1 px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm font-semibold text-bank-900 focus:outline-none focus:border-money-400 focus:bg-white transition"
-            autoFocus
-          />
-        </div>
-
-        {/* Color presets */}
-        <div>
-          <p className="text-xs font-bold text-bank-500 uppercase tracking-wide mb-2">Color</p>
-          <div className="flex items-center gap-2 flex-wrap">
-            {PRESET_COLORS.map(c => (
-              <button
-                key={c}
-                type="button"
-                onClick={() => setColor(c)}
-                className="w-7 h-7 rounded-full transition-transform hover:scale-110 active:scale-95 flex items-center justify-center"
-                style={{ backgroundColor: c }}
-              >
-                {color === c && (
-                  <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7"/>
-                  </svg>
-                )}
-              </button>
-            ))}
-            {/* Custom color picker */}
-            <div className="relative w-7 h-7 rounded-full overflow-hidden border-2 border-dashed border-gray-300">
-              <input
-                type="color"
-                value={color}
-                onChange={e => setColor(e.target.value)}
-                className="absolute -top-2 -left-2 w-12 h-12 cursor-pointer opacity-0"
-                title="Custom color"
-              />
-              <div className="w-full h-full flex items-center justify-center text-gray-400 text-xs pointer-events-none">+</div>
-            </div>
-          </div>
-        </div>
-
-        {/* Icon grid */}
-        <div>
-          <p className="text-xs font-bold text-bank-500 uppercase tracking-wide mb-2">Icon</p>
-          <div className="grid grid-cols-5 sm:grid-cols-8 gap-2">
-            {Object.keys(ICON_SET).map(k => (
-              <button
-                key={k}
-                type="button"
-                onClick={() => setIcon(k)}
-                className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all active:scale-95 ${
-                  icon === k
-                    ? 'shadow-md scale-110 text-white'
-                    : 'bg-gray-50 text-bank-500 hover:bg-gray-100'
-                }`}
-                style={icon === k ? { backgroundColor: color } : {}}
-                title={k}
-              >
-                <SvgIcon name={k} className="w-5 h-5" />
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Actions */}
-        <div className="flex gap-3 pt-1">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="flex-1 py-2.5 rounded-xl text-sm font-bold text-bank-500 bg-gray-100 hover:bg-gray-200 transition"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={loading || !name.trim()}
-            className="flex-[2] py-2.5 rounded-xl text-sm font-bold text-white shadow-sm transition disabled:opacity-50 active:scale-[0.98]"
-            style={{ backgroundColor: color }}
-          >
-            {loading ? 'Saving...' : 'Create Category'}
-          </button>
-        </div>
+    <div className="card anim-up" style={{ marginBottom: 12 }}>
+      {body}
+      <div style={{ padding: '0 16px 14px', display: 'flex', gap: 8 }}>
+        <Button variant="ghost" block onClick={onCancel}>Cancel</Button>
+        <Button variant="primary" block loading={loading} onClick={handleSubmit} style={{ background: color, borderColor: color }}>
+          Create Category
+        </Button>
       </div>
     </div>
   );

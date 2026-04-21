@@ -2,12 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#007AFF" />
-  <meta name="description" content="MyVault — Smart Personal Finance" />
-  <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
-  <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+  <meta name="theme-color" content="#2563EB" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
@@ -15,37 +11,29 @@
     tailwind.config = {
       theme: {
         extend: {
-          fontFamily: {
-            sans: ['Plus Jakarta Sans', '-apple-system', 'BlinkMacSystemFont', 'Helvetica Neue', 'sans-serif'],
-          },
+          fontFamily: { sans: ['Plus Jakarta Sans', '-apple-system', 'sans-serif'] },
           colors: {
-            // iOS-inspired blue replaces the old green "money" theme
-            money: {
-              50:  '#EFF6FF',
-              100: '#DBEAFE',
-              200: '#BFDBFE',
-              300: '#93C5FD',
-              600: '#007AFF',   // iOS Blue — primary action color
-              700: '#0065D1',
-              800: '#0052A8',
-              900: '#003F80',
-            },
-            // iOS system palette
-            bank: {
-              50:  '#F2F2F7',   // iOS system grouped background
-              100: '#FFFFFF',   // card / sheet surface
-              500: '#8E8E93',   // secondary label
-              900: '#1C1C1E',   // primary label
-            },
+            primary:  { DEFAULT:'#2563EB', light:'#EFF6FF', muted:'#DBEAFE', dark:'#1D4ED8' },
+            success:  { DEFAULT:'#059669', light:'#ECFDF5' },
+            danger:   { DEFAULT:'#DC2626', light:'#FEF2F2' },
+            warning:  { DEFAULT:'#D97706', light:'#FFFBEB' },
+            surface:  { DEFAULT:'#FFFFFF', 2:'#F8FAFC' },
+            border:   { DEFAULT:'#E4E8F0', light:'#EEF2F7' },
+            ink:      { 1:'#0F172A', 2:'#334155', 3:'#64748B', 4:'#94A3B8' },
+          },
+          fontSize: {
+            '2xs':['10px','14px'], xs:['11px','15px'], sm:['12px','16px'],
+            base:['13px','18px'], md:['14px','20px'], lg:['15px','22px'],
+            xl:['17px','24px'], '2xl':['20px','28px'], '3xl':['24px','32px'],
           }
         }
       }
     }
   </script>
-  <title>MyVault — Smart Finance</title>
+  <title>MyVault</title>
 </head>
 <body>
-  <noscript>You need to enable JavaScript to run this app.</noscript>
+  <noscript>JavaScript required.</noscript>
   <div id="root"></div>
 </body>
 </html>

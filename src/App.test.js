@@ -1,1 +1,1 @@
-test('app loads', () => { expect(true).toBe(true); });
+test('ok',()=>expect(true).toBe(true));

@@ -1,110 +1,110 @@
-import React, { useState } from 'react';
-import { db } from '../firebase';
-import { doc, deleteDoc } from 'firebase/firestore';
-import { useAccounts } from '../hooks/useData';
-import { AddAccountModal } from '../components/modals';
-import { IOS, CURRENCIES, ACCOUNT_TYPES } from '../constants';
-import { Card, Btn, Icon, Empty } from '../components/ui';
+import React, {useState} from 'react';
+import {db} from '../firebase';
+import {doc, deleteDoc} from 'firebase/firestore';
+import {useAccounts, useTransactions} from '../hooks/useData';
+import {AccountModal} from '../components/Modals';
+import DrillDown from '../components/DrillDown';
+import {T, CURRENCIES, ACCOUNT_TYPES, fmt} from '../constants';
+import {Group, Row, Icon, Empty, Btn} from '../components/Ui';
 
-export default function Accounts({ user }) {
+const TYPE_COLOR = {Bank:'#056DFF',Cash:'#30D158',Savings:'#FF9500',Credit:'#FF3B30',Investment:'#BF5AF2'};
+const emoji = type => ACCOUNT_TYPES.find(t=>t.value===type)?.emoji||'💳';
+
+export default function Accounts({user}) {
   const accounts = useAccounts(user.uid);
+  const allTxns  = useTransactions(user.uid, {range:'all'});
   const [showAdd, setShowAdd] = useState(false);
-  const [hiddenBals, setHiddenBals] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('mv_hb') || '{}'); } catch { return {}; }
-  });
-  const saveHB = h => { setHiddenBals(h); localStorage.setItem('mv_hb', JSON.stringify(h)); };
+  const [drill,   setDrill]   = useState(null);
+  const [hidden,  setHidden]  = useState(()=>{try{return JSON.parse(localStorage.getItem('mv_hide')||'{}')}catch{return{}}});
+  const saveHide = h=>{setHidden(h);localStorage.setItem('mv_hide',JSON.stringify(h));};
 
-  const totals = accounts.reduce((acc, a) => ({
-    ...acc, [a.currency]: (acc[a.currency] || 0) + a.currentBalance
-  }), {});
+  const totals = accounts.reduce((acc,a)=>({...acc,[a.currency]:(acc[a.currency]||0)+a.currentBalance}),{});
 
-  const del = async acc => {
-    if (!window.confirm(`Delete "${acc.name}"?\nTransactions will remain but show no account.`)) return;
-    await deleteDoc(doc(db, `users/${user.uid}/accounts`, acc.id));
+  const delAcc = async acc => {
+    if (!window.confirm(`Delete "${acc.name}"?`)) return;
+    await deleteDoc(doc(db,`users/${user.uid}/accounts`,acc.id));
   };
 
+  const openDrill = acc => {
+    const txns = allTxns.filter(t=>t.accountId===acc.id);
+    setDrill({type:'account',label:acc.name,color:TYPE_COLOR[acc.type]||T.blue,txns,cats:[],accs:accounts,accObj:acc});
+  };
+
+  // Group accounts by type
+  const groups = ACCOUNT_TYPES.filter(t=>accounts.some(a=>a.type===t.value));
+
   return (
-    <div style={{ padding: '14px 16px 24px', maxWidth: 640, margin: '0 auto' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-        <div>
-          <h1 style={{ fontSize: 20, fontWeight: 800, color: IOS.gray1, letterSpacing: -0.5, margin: 0 }}>Accounts</h1>
-          <p style={{ margin: '2px 0 0', fontSize: 12, color: IOS.gray5 }}>{accounts.length} account{accounts.length !== 1 ? 's' : ''}</p>
-        </div>
-        <Btn icon="plus" onClick={() => setShowAdd(true)}>Add Account</Btn>
+    <div style={{padding:'16px 16px 32px',maxWidth:680,margin:'0 auto'}}>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20}}>
+        <h1 style={{margin:0,fontSize:22,fontWeight:700,color:T.t1,letterSpacing:-0.4}}>Accounts</h1>
+        <Btn icon="plus" onClick={()=>setShowAdd(true)}>Add Account</Btn>
       </div>
 
-      {/* Net worth summary */}
-      {Object.keys(totals).length > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(130px,1fr))', gap: 8, marginBottom: 16 }}>
-          {Object.entries(totals).map(([curr, total]) => {
-            const sym = CURRENCIES.find(c => c.code === curr)?.symbol || curr;
-            const neg = total < 0;
+      {/* Net worth cards */}
+      {Object.keys(totals).length>0 && (
+        <Group label="Net Worth">
+          {Object.entries(totals).map(([cur,total],i,arr)=>{
+            const sym = CURRENCIES.find(c=>c.code===cur)?.symbol||cur;
+            const neg = total<0;
             return (
-              <Card key={curr} style={{ padding: '11px 14px' }}>
-                <p style={{ margin: '0 0 3px', fontSize: 9, fontWeight: 700, color: IOS.gray5, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{curr} Total</p>
-                <p style={{ margin: 0, fontSize: 16, fontWeight: 800, letterSpacing: -0.5, color: neg ? IOS.red : IOS.gray1 }}>
-                  {neg ? '-' : ''}{sym}{Math.abs(total).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                </p>
-              </Card>
+              <Row key={cur} label={`${cur} Total`}
+                value={<span style={{fontSize:17,fontWeight:700,color:neg?T.red:T.t1,letterSpacing:-0.3}}>{neg?'-':''}{sym}{Math.abs(total).toLocaleString(undefined,{minimumFractionDigits:2})}</span>}
+                last={i===arr.length-1}
+              />
             );
           })}
-        </div>
+        </Group>
       )}
 
-      {/* Account list */}
-      {accounts.length === 0 ? (
-        <div style={{ border: `2px dashed ${IOS.gray8}`, borderRadius: 18, padding: '32px' }}>
-          <Empty emoji="🏦" title="No accounts yet" subtitle="Add your first account to start tracking."
-            action={<Btn icon="plus" onClick={() => setShowAdd(true)}>Add Account</Btn>} />
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {accounts.map(acc => {
-            const sym    = CURRENCIES.find(c => c.code === acc.currency)?.symbol || acc.currency;
-            const hidden = hiddenBals[acc.id];
-            const neg    = acc.currentBalance < 0;
-            const emoji  = ACCOUNT_TYPES.find(t => t.value === acc.type)?.emoji || '💳';
-            const label  = ACCOUNT_TYPES.find(t => t.value === acc.type)?.label || acc.type;
-            return (
-              <Card key={acc.id} style={{ padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 12 }}>
-                {/* Icon */}
-                <div style={{ width: 40, height: 40, borderRadius: 12, background: IOS.blue + '12', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 19, flexShrink: 0 }}>
-                  {emoji}
+      {/* Accounts grouped by type */}
+      {accounts.length===0
+        ? <div style={{border:`2px dashed ${T.sep}`,borderRadius:16,padding:'32px'}}><Empty emoji="🏦" title="No accounts yet" sub="Create your first account to get started." action={<Btn onClick={()=>setShowAdd(true)}>Create Account</Btn>}/></div>
+        : groups.map(g=>(
+          <Group key={g.value} label={g.label}>
+            {accounts.filter(a=>a.type===g.value).map((acc,i,arr)=>{
+              const sym    = CURRENCIES.find(c=>c.code===acc.currency)?.symbol||acc.currency;
+              const isHid  = !!hidden[acc.id];
+              const neg    = acc.currentBalance<0;
+              return (
+                <div key={acc.id} style={{display:'flex',alignItems:'center',gap:0,borderBottom:i<arr.length-1?`0.5px solid ${T.sep}`:'none'}}>
+                  <div onClick={()=>openDrill(acc)} style={{flex:1,display:'flex',alignItems:'center',gap:12,padding:'12px 16px',cursor:'pointer',transition:'background 0.1s',minWidth:0}}
+                    onMouseEnter={e=>e.currentTarget.style.background=T.surface2}
+                    onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                    <div style={{width:34,height:34,borderRadius:9,background:(TYPE_COLOR[acc.type]||T.blue)+'15',display:'flex',alignItems:'center',justifyContent:'center',fontSize:18,flexShrink:0}}>
+                      {emoji(acc.type)}
+                    </div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <p style={{margin:0,fontSize:15,color:T.t1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{acc.name}</p>
+                      <p style={{margin:0,fontSize:12,color:T.t3}}>{acc.currency}</p>
+                    </div>
+                    <p style={{
+                      margin:0,fontSize:15,fontWeight:600,color:neg?T.red:T.t1,flexShrink:0,marginRight:4,
+                      filter:isHid?'blur(6px)':'none',userSelect:isHid?'none':'auto',transition:'filter 0.2s',
+                    }}>
+                      {sym}{Math.abs(acc.currentBalance).toLocaleString(undefined,{minimumFractionDigits:2})}
+                    </p>
+                    <Icon name="chevR" size={13} color={T.t4}/>
+                  </div>
+                  {/* Actions */}
+                  <div style={{display:'flex',gap:0,padding:'0 10px',borderLeft:`0.5px solid ${T.sep}`}}>
+                    <button onClick={()=>saveHide({...hidden,[acc.id]:!isHid})} style={{background:'none',border:'none',cursor:'pointer',padding:'6px 8px',color:T.t3,display:'flex',alignItems:'center',borderRadius:7}}>
+                      <Icon name={isHid?'eyeOff':'eye'} size={14} color={T.t3}/>
+                    </button>
+                    <button onClick={()=>delAcc(acc)} style={{background:'none',border:'none',cursor:'pointer',padding:'6px 8px',color:T.t3,display:'flex',alignItems:'center',borderRadius:7}}
+                      onMouseEnter={e=>e.currentTarget.style.color=T.red}
+                      onMouseLeave={e=>e.currentTarget.style.color=T.t3}>
+                      <Icon name="trash" size={14} color="currentColor"/>
+                    </button>
+                  </div>
                 </div>
-                {/* Info */}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: IOS.gray1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{acc.name}</p>
-                  <p style={{ margin: 0, fontSize: 10, color: IOS.gray5 }}>{label} · {acc.currency}</p>
-                </div>
-                {/* Balance + actions */}
-                <div style={{ textAlign: 'right', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <p style={{
-                    margin: 0, fontSize: 14, fontWeight: 800, letterSpacing: -0.4,
-                    color: neg ? IOS.red : IOS.gray1,
-                    filter: hidden ? 'blur(8px)' : 'none',
-                    userSelect: hidden ? 'none' : 'auto',
-                    transition: 'filter 0.2s',
-                  }}>
-                    {neg ? '-' : ''}{sym}{Math.abs(acc.currentBalance).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  </p>
-                  <button onClick={() => saveHB({ ...hiddenBals, [acc.id]: !hidden })}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 3, display: 'flex', alignItems: 'center', borderRadius: 6, color: IOS.gray5 }}>
-                    <Icon name={hidden ? 'eyeOff' : 'eye'} size={13} color={IOS.gray5} />
-                  </button>
-                  <button onClick={() => del(acc)}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 3, display: 'flex', alignItems: 'center', borderRadius: 6, color: IOS.gray5 }}
-                    onMouseEnter={e => e.currentTarget.style.color = IOS.red}
-                    onMouseLeave={e => e.currentTarget.style.color = IOS.gray5}>
-                    <Icon name="trash" size={13} color="currentColor" />
-                  </button>
-                </div>
-              </Card>
-            );
-          })}
-        </div>
-      )}
+              );
+            })}
+          </Group>
+        ))
+      }
 
-      <AddAccountModal user={user} open={showAdd} onClose={() => setShowAdd(false)} />
+      <AccountModal user={user} open={showAdd} onClose={()=>setShowAdd(false)}/>
+      <DrillDown ctx={drill} onClose={()=>setDrill(null)}/>
     </div>
   );
 }

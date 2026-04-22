@@ -1,2 +1,1 @@
-const reportWebVitals = () => {};
-export default reportWebVitals;
+const r=()=>{}; export default r;

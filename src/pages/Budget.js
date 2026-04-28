@@ -1,210 +1,609 @@
-import React, {useState, useMemo} from 'react';
-import {db} from '../firebase';
-import {collection, addDoc, doc, deleteDoc, Timestamp} from 'firebase/firestore';
-import {useCategories, useTransactions, useBudgets} from '../hooks/useData';
-import {T, CURRENCIES, fmt} from '../constants';
-import {Icon, Group, Row, Sheet, Field, Sel, Btn, Progress, Empty} from '../components/Ui';
-import {SvgIcon} from '../utils/icons';
+// ─────────────────────────────────────────────────────────────────────────────
+// MyVault v6 — pages/Budget.jsx
+// Budget Baker style. Per-category monthly budgets.
+// • Month navigator (back / forward arrows)
+// • Overall budget ring — total spent vs total budgeted
+// • Per-category rows: progress bar blue → orange @80% → red @100%
+// • Unbudgeted spending shown separately below
+// • Set budget via bottom sheet (amount + currency)
+// • Remove individual budgets
+// • Reacts to global filter's currency selection
+// ─────────────────────────────────────────────────────────────────────────────
 
-// ─── Add Budget Sheet ─────────────────────────────────────────────────────────
-function AddBudgetSheet({user, cats, monthYear, open, onClose}) {
-  const [catId,  setCatId]  = useState('');
-  const [amount, setAmount] = useState('');
-  const [saving, setSaving] = useState(false);
-  const expCats = cats.filter(c=>c.type==='expense');
-  const currency = cats.find(c=>c.id===catId)?.currency||'USD'; // fallback
+import React, { useState, useMemo, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { COLORS, FONT, RADIUS, SHADOW, SPACE, ANIM, CURRENCIES, DEFAULT_CURRENCY } from '../constants';
+import { useCategories, useTransactions, useBudgets } from '../hooks/useData';
+import { formatAmount } from '../utils/currency';
+import {
+  Icon, BottomSheet, AlertDialog, Skeleton, EmptyState, Spinner,
+  SegmentedControl,
+} from '../components/ui';
 
-  const submit = async () => {
-    if (!catId||!amount||parseFloat(amount)<=0) return;
-    setSaving(true);
-    try {
-      await addDoc(collection(db,`users/${user.uid}/budgets`),{
-        categoryId:catId, monthYear, amount:parseFloat(amount),
-        createdAt:Timestamp.now(),
-      });
-      setCatId(''); setAmount('');
-      onClose();
-    } catch(e){console.error(e);}
-    finally{setSaving(false);}
-  };
+// ─── helpers ──────────────────────────────────────────────────────────────────
+const monthKey   = (y, m) => `${y}-${String(m + 1).padStart(2, '0')}`;
+const monthLabel = (y, m) => new Date(y, m, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
+
+// ─── Overall ring ─────────────────────────────────────────────────────────────
+function BudgetRing({ spent, budgeted, currency }) {
+  const pct    = budgeted > 0 ? Math.min(spent / budgeted, 1) : 0;
+  const over   = spent > budgeted && budgeted > 0;
+  const r      = 54;
+  const circ   = 2 * Math.PI * r;
+  const dash   = circ * pct;
+  const ringColor = pct >= 1 ? COLORS.red : pct >= 0.8 ? COLORS.orange : COLORS.blue;
 
   return (
-    <Sheet open={open} onClose={onClose} title="Set Category Budget"
-      footer={<div style={{display:'flex',gap:8}}><Btn variant="outline" block onClick={onClose}>Cancel</Btn><Btn block loading={saving} onClick={submit}>Save Budget</Btn></div>}>
-      <div style={{display:'flex',flexDirection:'column',gap:14,paddingBottom:10}}>
-        <Sel label="Category" value={catId} onChange={e=>setCatId(e.target.value)}>
-          <option value="">Select category…</option>
-          {expCats.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
-        </Sel>
-        <Field label="Monthly Budget Amount" type="number" step="0.01" min="0"
-          placeholder="0.00" value={amount} onChange={e=>setAmount(e.target.value)}/>
-        <p style={{fontSize:11,color:T.t3,marginTop:-8}}>This budget applies to {monthYear.replace('-',' · ')}.</p>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: SPACE.sm }}>
+      <div style={{ position: 'relative', width: 128, height: 128 }}>
+        <svg width="128" height="128" style={{ transform: 'rotate(-90deg)' }}>
+          {/* Track */}
+          <circle cx="64" cy="64" r={r} fill="none" stroke={COLORS.fillTertiary} strokeWidth="10" />
+          {/* Progress */}
+          <circle
+            cx="64" cy="64" r={r} fill="none"
+            stroke={ringColor} strokeWidth="10"
+            strokeLinecap="round"
+            strokeDasharray={`${dash} ${circ}`}
+            style={{ transition: `stroke-dasharray 0.8s ${ANIM.spring}, stroke 0.3s` }}
+          />
+        </svg>
+        {/* Centre text */}
+        <div style={{
+          position: 'absolute', inset: 0,
+          display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div style={{
+            fontSize: '13px', fontWeight: 700, color: ringColor,
+            fontFamily: FONT.family, fontVariantNumeric: 'tabular-nums',
+          }}>
+            {Math.round(pct * 100)}%
+          </div>
+          <div style={{ fontSize: '10px', color: COLORS.labelTertiary, fontFamily: FONT.family }}>
+            {over ? 'over' : 'used'}
+          </div>
+        </div>
       </div>
-    </Sheet>
+
+      {budgeted > 0 && (
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: FONT.subheadline.size, fontFamily: FONT.family }}>
+            <span style={{ fontWeight: 700, color: over ? COLORS.red : COLORS.labelPrimary, fontVariantNumeric: 'tabular-nums' }}>
+              {currency} {formatAmount(spent, currency)}
+            </span>
+            <span style={{ color: COLORS.labelTertiary }}>
+              {' '}/ {formatAmount(budgeted, currency)}
+            </span>
+          </div>
+          <div style={{
+            fontSize: FONT.caption1.size, color: over ? COLORS.red : COLORS.labelSecondary,
+            fontFamily: FONT.family, marginTop: 2,
+          }}>
+            {over
+              ? `${currency} ${formatAmount(spent - budgeted, currency)} over budget`
+              : `${currency} ${formatAmount(budgeted - spent, currency)} remaining`
+            }
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
-// ─── Budget page ──────────────────────────────────────────────────────────────
-export default function Budget({user}) {
-  const now = new Date();
-  const [year,  setYear]  = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth()); // 0-indexed
-  const [showAdd,setShowAdd] = useState(false);
-
-  const monthYear = `${year}-${String(month+1).padStart(2,'0')}`;
-  const monthLabel = new Date(year,month,1).toLocaleString('default',{month:'long',year:'numeric'});
-
-  const categories = useCategories(user.uid);
-  const budgets    = useBudgets(user.uid, monthYear);
-  const txns       = useTransactions(user.uid, {
-    range:'custom',
-    from:`${year}-${String(month+1).padStart(2,'0')}-01`,
-    to:  new Date(year,month+1,0).toISOString().slice(0,10),
-  });
-
-  const prevMonth = () => { if(month===0){setMonth(11);setYear(y=>y-1);}else setMonth(m=>m-1); };
-  const nextMonth = () => { if(month===11){setMonth(0);setYear(y=>y+1);}else setMonth(m=>m+1); };
-
-  // Spending per category this month
-  const catSpend = useMemo(()=>{
-    const m={};
-    txns.filter(t=>t.type==='expense').forEach(t=>{
-      if(!m[t.categoryId])m[t.categoryId]=0;
-      m[t.categoryId]+=t.amount;
-    }); return m;
-  },[txns]);
-
-  const totalSpend  = Object.values(catSpend).reduce((s,v)=>s+v,0);
-  const totalBudget = budgets.reduce((s,b)=>s+b.amount,0);
-  const totalLeft   = totalBudget - totalSpend;
-  const currency    = txns[0]?.currency||'USD';
-  const sym         = CURRENCIES.find(c=>c.code===currency)?.symbol||'';
-  const spendPct    = totalBudget>0?(totalSpend/totalBudget)*100:0;
-
-  const delBudget = async id => {
-    await deleteDoc(doc(db,`users/${user.uid}/budgets`,id));
-  };
-
-  const budgeted = budgets.map(b=>{
-    const cat   = categories.find(c=>c.id===b.categoryId);
-    const spent = catSpend[b.categoryId]||0;
-    const left  = b.amount - spent;
-    const pct   = b.amount>0?(spent/b.amount)*100:0;
-    return {budget:b, cat, spent, left, pct};
-  }).sort((a,b)=>b.pct-a.pct);
-
-  // Categories with no budget (show spending only)
-  const unbudgeted = Object.entries(catSpend)
-    .filter(([catId])=>!budgets.some(b=>b.categoryId===catId))
-    .map(([catId,spent])=>({cat:categories.find(c=>c.id===catId),spent,catId}))
-    .filter(x=>x.cat)
-    .sort((a,b)=>b.spent-a.spent);
+// ─── Budget Row ───────────────────────────────────────────────────────────────
+function BudgetRow({ cat, spent, budgeted, currency, onSetBudget, onRemove, onPress, index }) {
+  const [pressed, setPressed] = useState(false);
+  const pct       = budgeted > 0 ? Math.min(spent / budgeted, 1) : 0;
+  const pctNum    = Math.round(pct * 100);
+  const barColor  = pct >= 1 ? COLORS.red : pct >= 0.8 ? COLORS.orange : COLORS.blue;
+  const over      = spent > budgeted && budgeted > 0;
 
   return (
-    <div style={{padding:'16px 16px 32px',maxWidth:680,margin:'0 auto'}}>
-      {/* Header */}
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:18}}>
-        <h1 style={{margin:0,fontSize:22,fontWeight:700,color:T.t1,letterSpacing:-0.4}}>Budget</h1>
-        <Btn icon="plus" onClick={()=>setShowAdd(true)}>Set Budget</Btn>
+    <button
+      onClick={() => onPress(cat)}
+      onMouseDown={() => setPressed(true)}
+      onMouseUp={() => setPressed(false)}
+      onMouseLeave={() => setPressed(false)}
+      style={{
+        width: '100%', display: 'flex', alignItems: 'flex-start', gap: SPACE.md,
+        padding: `${SPACE.md}px ${SPACE.lg}px`,
+        background: pressed ? COLORS.fillTertiary : 'transparent',
+        border: 'none', cursor: 'pointer', textAlign: 'left',
+        transition: `background ${ANIM.fast}ms`,
+        WebkitTapHighlightColor: 'transparent',
+        animation: `mv6-fade-in ${ANIM.normal}ms ease ${Math.min(index * 50, 400)}ms both`,
+      }}
+    >
+      {/* Icon */}
+      <div style={{
+        width: 40, height: 40, borderRadius: RADIUS.lg,
+        background: `${cat.color}18`, flexShrink: 0,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        <Icon name={cat.icon} size={19} color={cat.color} strokeWidth={1.75} />
       </div>
 
-      {/* Month navigator */}
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',background:T.surface,borderRadius:12,padding:'11px 16px',boxShadow:T.shadow,marginBottom:16}}>
-        <button onClick={prevMonth} style={{background:'none',border:'none',cursor:'pointer',width:32,height:32,borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',color:T.blue}}>
-          <Icon name="back" size={16} color={T.blue}/>
-        </button>
-        <span style={{fontSize:16,fontWeight:700,color:T.t1}}>{monthLabel}</span>
-        <button onClick={nextMonth} style={{background:'none',border:'none',cursor:'pointer',width:32,height:32,borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',color:T.blue}}>
-          <Icon name="chevR" size={16} color={T.blue}/>
-        </button>
-      </div>
+      {/* Content */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 }}>
+          <span style={{
+            fontSize: FONT.callout.size, fontWeight: FONT.medium,
+            color: COLORS.labelPrimary, fontFamily: FONT.family,
+          }}>
+            {cat.name}
+          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: SPACE.sm, flexShrink: 0 }}>
+            {budgeted > 0 ? (
+              <span style={{
+                fontSize: FONT.footnote.size, fontWeight: FONT.semibold,
+                color: over ? COLORS.red : COLORS.labelSecondary,
+                fontFamily: FONT.family, fontVariantNumeric: 'tabular-nums',
+              }}>
+                {formatAmount(spent, currency)} / {formatAmount(budgeted, currency)}
+              </span>
+            ) : (
+              <span style={{ fontSize: FONT.footnote.size, color: COLORS.labelTertiary, fontFamily: FONT.family }}>
+                {spent > 0 ? formatAmount(spent, currency) : 'No budget'}
+              </span>
+            )}
+            {/* Edit / set budget */}
+            <button
+              onClick={e => { e.stopPropagation(); onSetBudget(cat); }}
+              style={{
+                width: 26, height: 26, borderRadius: RADIUS.full,
+                background: COLORS.fillTertiary, border: 'none',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                cursor: 'pointer', flexShrink: 0,
+                WebkitTapHighlightColor: 'transparent',
+              }}
+            >
+              <Icon name={budgeted > 0 ? 'Pencil' : 'Plus'} size={12} color={COLORS.blue} strokeWidth={2} />
+            </button>
+            {budgeted > 0 && (
+              <button
+                onClick={e => { e.stopPropagation(); onRemove(cat); }}
+                style={{
+                  width: 26, height: 26, borderRadius: RADIUS.full,
+                  background: `${COLORS.red}12`, border: 'none',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: 'pointer', flexShrink: 0,
+                  WebkitTapHighlightColor: 'transparent',
+                }}
+              >
+                <Icon name="X" size={12} color={COLORS.red} strokeWidth={2.5} />
+              </button>
+            )}
+          </div>
+        </div>
 
-      {/* Overall budget card */}
-      {totalBudget>0 && (
-        <div style={{background:T.surface,borderRadius:16,boxShadow:T.shadow,padding:'18px 18px',marginBottom:16}}>
-          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:4}}>
-            <p style={{margin:0,fontSize:12,fontWeight:500,color:T.t3,textTransform:'uppercase',letterSpacing:'0.04em'}}>Overall Spending</p>
-            <span style={{fontSize:12,fontWeight:600,color:totalLeft>=0?T.green:T.red}}>
-              {totalLeft>=0?`${sym}${totalLeft.toLocaleString(undefined,{minimumFractionDigits:2})} left`:`${sym}${Math.abs(totalLeft).toLocaleString(undefined,{minimumFractionDigits:2})} over`}
+        {/* Progress bar — only if budget set */}
+        {budgeted > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: SPACE.sm }}>
+            <div style={{ flex: 1, height: 5, background: COLORS.fillTertiary, borderRadius: RADIUS.full, overflow: 'hidden' }}>
+              <div style={{
+                height: '100%',
+                width: `${pctNum}%`,
+                background: barColor,
+                borderRadius: RADIUS.full,
+                transition: `width 0.7s ${ANIM.spring}, background 0.3s`,
+              }} />
+            </div>
+            <span style={{
+              fontSize: FONT.caption2.size, fontWeight: FONT.semibold,
+              color: barColor, fontFamily: FONT.family, minWidth: 30,
+            }}>
+              {pctNum}%
             </span>
           </div>
-          <p style={{margin:'4px 0 10px',fontSize:28,fontWeight:800,color:T.t1,letterSpacing:-0.8}}>
-            {sym}{totalSpend.toLocaleString(undefined,{minimumFractionDigits:2})}
-            <span style={{fontSize:14,fontWeight:400,color:T.t3,marginLeft:6}}>of {sym}{totalBudget.toLocaleString(undefined,{minimumFractionDigits:2})} budgeted</span>
-          </p>
-          <Progress pct={spendPct} color={spendPct>100?T.red:spendPct>80?T.orange:T.blue} height={8}/>
-          <div style={{display:'flex',justifyContent:'space-between',marginTop:5}}>
-            <span style={{fontSize:11,color:T.t3}}>{sym}{totalSpend.toLocaleString(undefined,{minimumFractionDigits:2})} spent</span>
-            <span style={{fontSize:11,color:T.t3}}>{sym}{totalBudget.toLocaleString(undefined,{minimumFractionDigits:2})} budgeted</span>
+        )}
+      </div>
+    </button>
+  );
+}
+
+// ─── Set Budget Sheet ─────────────────────────────────────────────────────────
+function SetBudgetSheet({ open, onClose, category, onSave, month, saving }) {
+  const [amount,   setAmount]   = useState('');
+  const [currency, setCurrency] = useState(DEFAULT_CURRENCY);
+
+  React.useEffect(() => {
+    if (open) { setAmount(''); }
+  }, [open, category?.id]);
+
+  const handleSave = () => {
+    const val = parseFloat(amount);
+    if (!val || val <= 0) return;
+    onSave(category.id, month, val, currency);
+  };
+
+  if (!category) return null;
+
+  return (
+    <BottomSheet open={open} onClose={onClose} title={`Budget — ${category.name}`} height={340}>
+      <div style={{ padding: `0 ${SPACE.lg}px ${SPACE.xl}px`, display: 'flex', flexDirection: 'column', gap: SPACE.md }}>
+        {/* Category preview */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: SPACE.md,
+          background: COLORS.fillTertiary, borderRadius: RADIUS.xl,
+          padding: `${SPACE.md}px`,
+        }}>
+          <div style={{
+            width: 44, height: 44, borderRadius: RADIUS.lg,
+            background: `${category.color}25`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <Icon name={category.icon} size={22} color={category.color} strokeWidth={1.75} />
           </div>
+          <div>
+            <div style={{ fontSize: FONT.callout.size, fontWeight: FONT.semibold, color: COLORS.labelPrimary, fontFamily: FONT.family }}>{category.name}</div>
+            <div style={{ fontSize: FONT.caption1.size, color: COLORS.labelTertiary, fontFamily: FONT.family }}>{month}</div>
+          </div>
+        </div>
+
+        {/* Amount + Currency */}
+        <div style={{ display: 'flex', gap: SPACE.md }}>
+          <input
+            type="number" inputMode="decimal"
+            value={amount} onChange={e => setAmount(e.target.value)}
+            placeholder="0.000"
+            style={{
+              flex: 1, padding: `${SPACE.md}px`, borderRadius: RADIUS.lg,
+              border: `1.5px solid ${COLORS.separatorOpaque}`,
+              fontSize: '24px', fontWeight: 700, textAlign: 'right',
+              fontFamily: FONT.family, color: COLORS.labelPrimary,
+              background: COLORS.bgPrimary, outline: 'none',
+              fontVariantNumeric: 'tabular-nums',
+            }}
+          />
+          <select
+            value={currency} onChange={e => setCurrency(e.target.value)}
+            style={{
+              width: 90, padding: `${SPACE.md}px`, borderRadius: RADIUS.lg,
+              border: `1.5px solid ${COLORS.separatorOpaque}`,
+              fontSize: FONT.callout.size, fontFamily: FONT.family,
+              color: COLORS.labelPrimary, background: COLORS.bgPrimary,
+              outline: 'none',
+            }}
+          >
+            {CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.code}</option>)}
+          </select>
+        </div>
+
+        <button
+          onClick={handleSave} disabled={saving}
+          style={{
+            width: '100%', padding: '17px', borderRadius: RADIUS.xl,
+            background: COLORS.blue, border: 'none',
+            cursor: saving ? 'not-allowed' : 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            opacity: saving ? 0.6 : 1,
+          }}
+        >
+          {saving
+            ? <Spinner size={20} color="#fff" />
+            : <span style={{ fontSize: '17px', fontWeight: FONT.semibold, color: '#fff', fontFamily: FONT.family }}>Set Budget</span>
+          }
+        </button>
+      </div>
+    </BottomSheet>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BUDGET PAGE
+// ─────────────────────────────────────────────────────────────────────────────
+export default function Budget({ user }) {
+  const navigate = useNavigate();
+  const now = new Date();
+
+  const [year,  setYear]  = useState(now.getFullYear());
+  const [month, setMonth] = useState(now.getMonth());
+  const [activeCurr, setActiveCurr] = useState(DEFAULT_CURRENCY);
+  const [setBudgetFor,  setSetBudgetFor]  = useState(null);
+  const [removeTarget,  setRemoveTarget]  = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const { categories, loading: catLoading }  = useCategories(user.uid);
+  const { budgets, setBudget, removeBudget } = useBudgets(user.uid);
+
+  // Transactions for the selected month — all time filter, scoped to month
+  const monthFilter = useMemo(() => ({
+    dateRange: 'custom',
+    accountIds: [],
+    customStart: new Date(year, month, 1).toISOString().split('T')[0],
+    customEnd:   new Date(year, month + 1, 0).toISOString().split('T')[0],
+  }), [year, month]);
+
+  const { transactions } = useTransactions(user.uid, monthFilter);
+
+  const mKey = monthKey(year, month);
+  const mLabel = monthLabel(year, month);
+
+  const prevMonth = () => {
+    if (month === 0) { setYear(y => y - 1); setMonth(11); }
+    else setMonth(m => m - 1);
+  };
+  const nextMonth = () => {
+    if (month === 11) { setYear(y => y + 1); setMonth(0); }
+    else setMonth(m => m + 1);
+  };
+  const isCurrentMonth = year === now.getFullYear() && month === now.getMonth();
+
+  // Expense categories only
+  const expenseCats = useMemo(
+    () => categories.filter(c => c.type !== 'income'),
+    [categories]
+  );
+
+  // Spending per category for this month + currency
+  const spending = useMemo(() => {
+    const map = {};
+    transactions
+      .filter(t => t.type === 'expense' && t.currency === activeCurr)
+      .forEach(t => {
+        const cid = t.categoryId || '__none__';
+        map[cid] = (map[cid] || 0) + (t.amount || 0);
+      });
+    return map;
+  }, [transactions, activeCurr]);
+
+  // Budgets for this month + currency
+  const getBudget = useCallback((catId) => {
+    const b = budgets.find(b => b.categoryId === catId && b.month === mKey);
+    return b?.amount || 0;
+  }, [budgets, mKey]);
+
+  // Totals
+  const { totalSpent, totalBudgeted } = useMemo(() => {
+    let spent = 0, budgeted = 0;
+    expenseCats.forEach(cat => {
+      spent    += spending[cat.id] || 0;
+      budgeted += getBudget(cat.id);
+    });
+    return { totalSpent: spent, totalBudgeted: budgeted };
+  }, [expenseCats, spending, getBudget]);
+
+  // Unbudgeted spending
+  const unbudgeted = useMemo(() => {
+    const unbudgetedCatIds = expenseCats.filter(c => !getBudget(c.id)).map(c => c.id);
+    return unbudgetedCatIds.reduce((s, id) => s + (spending[id] || 0), 0)
+      + (spending['__none__'] || 0);
+  }, [expenseCats, spending, getBudget]);
+
+  // Currencies from transactions
+  const currencies = useMemo(() => [...new Set(transactions.map(t => t.currency).filter(Boolean))], [transactions]);
+
+  const handleSetBudget = async (catId, month, amount) => {
+    setSaving(true);
+    try { await setBudget(catId, month, amount); setSetBudgetFor(null); }
+    catch (e) { console.error(e); }
+    finally { setSaving(false); }
+  };
+
+  const handleRemoveBudget = async () => {
+    if (!removeTarget) return;
+    const b = budgets.find(b => b.categoryId === removeTarget.id && b.month === mKey);
+    if (b) await removeBudget(b.id);
+    setRemoveTarget(null);
+  };
+
+  return (
+    <div>
+      {/* ── Header ──────────────────────────────────────────────────────────────── */}
+      <div style={{ padding: `${SPACE.xl}px ${SPACE.lg}px ${SPACE.md}px` }}>
+        <h1 style={{
+          margin: 0, fontSize: FONT.largeTitle.size, fontWeight: FONT.bold,
+          color: COLORS.labelPrimary, fontFamily: FONT.family, letterSpacing: '-0.5px',
+        }}>
+          Budget
+        </h1>
+      </div>
+
+      {/* ── Month navigator ──────────────────────────────────────────────────────── */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: `0 ${SPACE.lg}px ${SPACE.lg}px`,
+      }}>
+        <button
+          onClick={prevMonth}
+          style={{
+            width: 38, height: 38, borderRadius: RADIUS.full,
+            background: COLORS.fillTertiary, border: 'none',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+          }}
+        >
+          <Icon name="ChevronLeft" size={18} color={COLORS.labelSecondary} strokeWidth={2.5} />
+        </button>
+
+        <div style={{ textAlign: 'center' }}>
+          <div style={{
+            fontSize: FONT.title3.size, fontWeight: FONT.semibold,
+            color: COLORS.labelPrimary, fontFamily: FONT.family,
+          }}>
+            {mLabel}
+          </div>
+          {isCurrentMonth && (
+            <div style={{
+              fontSize: FONT.caption2.size, color: COLORS.blue,
+              fontFamily: FONT.family, fontWeight: FONT.semibold,
+            }}>
+              Current Month
+            </div>
+          )}
+        </div>
+
+        <button
+          onClick={nextMonth}
+          style={{
+            width: 38, height: 38, borderRadius: RADIUS.full,
+            background: COLORS.fillTertiary, border: 'none',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+          }}
+        >
+          <Icon name="ChevronRight" size={18} color={COLORS.labelSecondary} strokeWidth={2.5} />
+        </button>
+      </div>
+
+      {/* ── Currency tabs ────────────────────────────────────────────────────────── */}
+      {currencies.length > 1 && (
+        <div style={{ display: 'flex', gap: SPACE.xs, padding: `0 ${SPACE.lg}px ${SPACE.md}px`, overflowX: 'auto' }}>
+          {currencies.map(c => (
+            <button key={c} onClick={() => setActiveCurr(c)} style={{
+              padding: '5px 14px', borderRadius: RADIUS.full,
+              background: activeCurr === c ? COLORS.blue : COLORS.fillTertiary,
+              border: 'none', cursor: 'pointer',
+              fontSize: '13px', fontWeight: FONT.semibold,
+              color: activeCurr === c ? '#fff' : COLORS.labelSecondary,
+              fontFamily: FONT.family, flexShrink: 0,
+              WebkitTapHighlightColor: 'transparent',
+            }}>{c}</button>
+          ))}
         </div>
       )}
 
-      {/* Category budgets */}
-      {budgeted.length>0 && (
-        <div style={{marginBottom:8}}>
-          <p style={{fontSize:12,fontWeight:500,color:T.t3,textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:8,paddingLeft:2}}>Category Budgets</p>
-          <div style={{background:T.surface,borderRadius:12,boxShadow:T.shadow,overflow:'hidden'}}>
-            {budgeted.map(({budget,cat,spent,left,pct},i,arr)=>{
-              if (!cat) return null;
-              const over = left<0;
-              return (
-                <div key={budget.id} style={{padding:'13px 16px',borderBottom:i<arr.length-1?`0.5px solid ${T.sep}`:'none'}}>
-                  <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:8}}>
-                    <div style={{width:34,height:34,borderRadius:9,background:cat.color,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-                      <SvgIcon name={cat.icon} className="w-4 h-4 text-white"/>
+      {/* ── Overall ring ─────────────────────────────────────────────────────────── */}
+      {totalBudgeted > 0 && (
+        <div style={{
+          margin: `0 ${SPACE.lg}px ${SPACE.lg}px`,
+          background: COLORS.surface, borderRadius: RADIUS.xxl,
+          padding: SPACE.xl, boxShadow: SHADOW.sm,
+          display: 'flex', justifyContent: 'center',
+        }}>
+          <BudgetRing spent={totalSpent} budgeted={totalBudgeted} currency={activeCurr} />
+        </div>
+      )}
+
+      {/* ── Category budgets ─────────────────────────────────────────────────────── */}
+      {catLoading ? (
+        <div style={{ margin: `0 ${SPACE.lg}px`, display: 'flex', flexDirection: 'column', gap: 1 }}>
+          {[...Array(5)].map((_, i) => <div key={i} style={{ height: 68, background: COLORS.surface, borderRadius: i === 0 ? `${RADIUS.xl}px ${RADIUS.xl}px 0 0` : i === 4 ? `0 0 ${RADIUS.xl}px ${RADIUS.xl}px` : 0 }} />)}
+        </div>
+      ) : expenseCats.length === 0 ? (
+        <EmptyState
+          icon="Target"
+          title="No expense categories"
+          message="Add categories first, then set budgets for them"
+          action={() => navigate('/categories')}
+          actionLabel="Go to Categories"
+        />
+      ) : (
+        <div style={{ margin: `0 ${SPACE.lg}px` }}>
+          {/* Budgeted categories */}
+          {(() => {
+            const budgeted = expenseCats.filter(c => getBudget(c.id) > 0);
+            const unset    = expenseCats.filter(c => getBudget(c.id) === 0);
+
+            return (
+              <>
+                {budgeted.length > 0 && (
+                  <div style={{ marginBottom: SPACE.md }}>
+                    <div style={{
+                      fontSize: FONT.footnote.size, fontWeight: FONT.semibold,
+                      color: COLORS.labelSecondary, textTransform: 'uppercase',
+                      letterSpacing: '0.8px', fontFamily: FONT.family,
+                      padding: `0 ${SPACE.xs}px ${SPACE.xs}px`,
+                    }}>
+                      Budgeted
                     </div>
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                        <span style={{fontSize:14,color:T.t1}}>{cat.name}</span>
-                        <span style={{fontSize:14,fontWeight:700,color:T.t1}}>{sym}{spent.toLocaleString(undefined,{minimumFractionDigits:2})}</span>
+                    <div style={{ background: COLORS.surface, borderRadius: RADIUS.xl, overflow: 'hidden', boxShadow: SHADOW.sm }}>
+                      {budgeted.map((cat, i, arr) => (
+                        <React.Fragment key={cat.id}>
+                          <BudgetRow
+                            cat={cat}
+                            spent={spending[cat.id] || 0}
+                            budgeted={getBudget(cat.id)}
+                            currency={activeCurr}
+                            onSetBudget={setSetBudgetFor}
+                            onRemove={setRemoveTarget}
+                            onPress={c => navigate(`/categories/${c.id}`)}
+                            index={i}
+                          />
+                          {i < arr.length - 1 && <div style={{ height: '0.5px', background: COLORS.separatorOpaque, marginLeft: 68 }} />}
+                        </React.Fragment>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Unbudgeted spending total */}
+                {unbudgeted > 0 && (
+                  <div style={{
+                    margin: `0 0 ${SPACE.md}px`,
+                    background: `${COLORS.orange}10`,
+                    borderRadius: RADIUS.xl, padding: `${SPACE.md}px ${SPACE.lg}px`,
+                    display: 'flex', alignItems: 'center', gap: SPACE.md,
+                    border: `1px solid ${COLORS.orange}25`,
+                  }}>
+                    <Icon name="AlertCircle" size={18} color={COLORS.orange} strokeWidth={2} />
+                    <div>
+                      <div style={{ fontSize: FONT.callout.size, fontWeight: FONT.semibold, color: COLORS.labelPrimary, fontFamily: FONT.family }}>
+                        Unbudgeted Spending
                       </div>
-                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:1}}>
-                        <span style={{fontSize:11,color:over?T.red:T.t3}}>
-                          {over?`${sym}${Math.abs(left).toLocaleString(undefined,{minimumFractionDigits:2})} over budget`:`${sym}${left.toLocaleString(undefined,{minimumFractionDigits:2})} left`}
-                        </span>
-                        <button onClick={()=>delBudget(budget.id)} style={{background:'none',border:'none',cursor:'pointer',padding:'2px 4px',fontSize:11,color:T.t4,fontFamily:'inherit'}}
-                          onMouseEnter={e=>e.currentTarget.style.color=T.red}
-                          onMouseLeave={e=>e.currentTarget.style.color=T.t4}>Remove</button>
+                      <div style={{ fontSize: FONT.footnote.size, color: COLORS.labelSecondary, fontFamily: FONT.family }}>
+                        {activeCurr} {formatAmount(unbudgeted, activeCurr)} across untracked categories
                       </div>
                     </div>
                   </div>
-                  <Progress pct={pct} color={pct>100?T.red:pct>80?T.orange:cat.color} height={5}/>
-                  <div style={{display:'flex',justifyContent:'space-between',marginTop:4}}>
-                    <span style={{fontSize:10,color:T.t3}}>{sym}{spent.toLocaleString(undefined,{minimumFractionDigits:2})} spent</span>
-                    <span style={{fontSize:10,color:T.t3}}>{sym}{budget.amount.toLocaleString(undefined,{minimumFractionDigits:2})} budget</span>
+                )}
+
+                {/* No-budget categories */}
+                {unset.length > 0 && (
+                  <div>
+                    <div style={{
+                      fontSize: FONT.footnote.size, fontWeight: FONT.semibold,
+                      color: COLORS.labelSecondary, textTransform: 'uppercase',
+                      letterSpacing: '0.8px', fontFamily: FONT.family,
+                      padding: `0 ${SPACE.xs}px ${SPACE.xs}px`,
+                    }}>
+                      No Budget Set
+                    </div>
+                    <div style={{ background: COLORS.surface, borderRadius: RADIUS.xl, overflow: 'hidden', boxShadow: SHADOW.sm }}>
+                      {unset.map((cat, i, arr) => (
+                        <React.Fragment key={cat.id}>
+                          <BudgetRow
+                            cat={cat}
+                            spent={spending[cat.id] || 0}
+                            budgeted={0}
+                            currency={activeCurr}
+                            onSetBudget={setSetBudgetFor}
+                            onRemove={() => {}}
+                            onPress={c => navigate(`/categories/${c.id}`)}
+                            index={budgeted.length + i}
+                          />
+                          {i < arr.length - 1 && <div style={{ height: '0.5px', background: COLORS.separatorOpaque, marginLeft: 68 }} />}
+                        </React.Fragment>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                )}
+              </>
+            );
+          })()}
         </div>
       )}
 
-      {/* Unbudgeted spending */}
-      {unbudgeted.length>0 && (
-        <div style={{marginBottom:8}}>
-          <p style={{fontSize:12,fontWeight:500,color:T.t3,textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:8,paddingLeft:2}}>Unbudgeted Spending</p>
-          <div style={{background:T.surface,borderRadius:12,boxShadow:T.shadow,overflow:'hidden'}}>
-            {unbudgeted.map(({cat,spent},i,arr)=>(
-              <div key={cat.id} style={{display:'flex',alignItems:'center',gap:10,padding:'11px 16px',borderBottom:i<arr.length-1?`0.5px solid ${T.sep}`:'none'}}>
-                <div style={{width:30,height:30,borderRadius:8,background:cat.color,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-                  <SvgIcon name={cat.icon} className="w-4 h-4 text-white"/>
-                </div>
-                <span style={{flex:1,fontSize:14,color:T.t1}}>{cat.name}</span>
-                <span style={{fontSize:14,fontWeight:600,color:T.t2}}>{sym}{spent.toLocaleString(undefined,{minimumFractionDigits:2})}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* ── Set budget sheet ─────────────────────────────────────────────────────── */}
+      <SetBudgetSheet
+        open={!!setBudgetFor}
+        onClose={() => setSetBudgetFor(null)}
+        category={setBudgetFor}
+        month={mKey}
+        onSave={handleSetBudget}
+        saving={saving}
+      />
 
-      {budgets.length===0 && txns.length===0 && (
-        <Empty emoji="🎯" title="No budgets set" sub="Set monthly spending limits for your categories."
-          action={<Btn onClick={()=>setShowAdd(true)}>Set First Budget</Btn>}/>
-      )}
-
-      <AddBudgetSheet user={user} cats={categories} monthYear={monthYear} open={showAdd} onClose={()=>setShowAdd(false)}/>
+      {/* ── Remove confirm ────────────────────────────────────────────────────────── */}
+      <AlertDialog
+        open={!!removeTarget}
+        onClose={() => setRemoveTarget(null)}
+        title="Remove Budget"
+        message={`Remove the budget for "${removeTarget?.name}" in ${mLabel}?`}
+        confirmLabel="Remove" confirmDestructive
+        onConfirm={handleRemoveBudget}
+      />
     </div>
   );
 }

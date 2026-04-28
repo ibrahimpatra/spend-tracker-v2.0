@@ -1,110 +1,486 @@
-import React, {useState} from 'react';
-import {db} from '../firebase';
-import {doc, deleteDoc} from 'firebase/firestore';
-import {useAccounts, useTransactions} from '../hooks/useData';
-import {AccountModal} from '../components/Modals';
-import DrillDown from '../components/DrillDown';
-import {T, CURRENCIES, ACCOUNT_TYPES, fmt} from '../constants';
-import {Group, Row, Icon, Empty, Btn} from '../components/Ui';
+// ─────────────────────────────────────────────────────────────────────────────
+// MyVault v6 — pages/Accounts.jsx
+// • Net worth summary per currency at top (never mixed)
+// • Accounts grouped by type (Bank / Cash / Savings / Credit / Investment / Wallet)
+// • Per-account balance with hide/show toggle
+// • Tap account → /accounts/:id (real URL drill-down)
+// • Add Account bottom sheet with full form
+// • Delete with confirmation
+// ─────────────────────────────────────────────────────────────────────────────
 
-const TYPE_COLOR = {Bank:'#056DFF',Cash:'#30D158',Savings:'#FF9500',Credit:'#FF3B30',Investment:'#BF5AF2'};
-const emoji = type => ACCOUNT_TYPES.find(t=>t.value===type)?.emoji||'💳';
+import React, { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 
-export default function Accounts({user}) {
-  const accounts = useAccounts(user.uid);
-  const allTxns  = useTransactions(user.uid, {range:'all'});
-  const [showAdd, setShowAdd] = useState(false);
-  const [drill,   setDrill]   = useState(null);
-  const [hidden,  setHidden]  = useState(()=>{try{return JSON.parse(localStorage.getItem('mv_hide')||'{}')}catch{return{}}});
-  const saveHide = h=>{setHidden(h);localStorage.setItem('mv_hide',JSON.stringify(h));};
+import { COLORS, FONT, RADIUS, SHADOW, SPACE, ANIM, ACCOUNT_TYPES, CURRENCIES, DEFAULT_CURRENCY } from '../constants';
+import { useAccounts, useHiddenBalances } from '../hooks/useData';
+import { calcNetWorthByCurrency, formatAmount } from '../utils/currency';
+import {
+  Icon, Card, InsetCard, SectionHeader, Separator,
+  BottomSheet, AlertDialog, PillButton, Skeleton, EmptyState, Spinner,
+} from '../components/ui';
+import { openAddTransaction } from '../components/Layout';
 
-  const totals = accounts.reduce((acc,a)=>({...acc,[a.currency]:(acc[a.currency]||0)+a.currentBalance}),{});
+// ─── Account type meta ────────────────────────────────────────────────────────
+const TYPE_META = {
+  bank:       { label: 'Bank Accounts',    icon: 'Landmark',   color: COLORS.blue    },
+  cash:       { label: 'Cash',             icon: 'Banknote',   color: COLORS.green   },
+  savings:    { label: 'Savings',          icon: 'PiggyBank',  color: COLORS.teal    },
+  credit:     { label: 'Credit Cards',     icon: 'CreditCard', color: COLORS.purple  },
+  investment: { label: 'Investments',      icon: 'TrendingUp', color: COLORS.orange  },
+  wallet:     { label: 'Digital Wallets',  icon: 'Wallet',     color: COLORS.indigo  },
+};
 
-  const delAcc = async acc => {
-    if (!window.confirm(`Delete "${acc.name}"?`)) return;
-    await deleteDoc(doc(db,`users/${user.uid}/accounts`,acc.id));
-  };
+// ─── Net Worth Card ───────────────────────────────────────────────────────────
+function NetWorthCard({ accounts }) {
+  const worth = useMemo(() => calcNetWorthByCurrency(accounts), [accounts]);
+  const currencies = Object.keys(worth);
 
-  const openDrill = acc => {
-    const txns = allTxns.filter(t=>t.accountId===acc.id);
-    setDrill({type:'account',label:acc.name,color:TYPE_COLOR[acc.type]||T.blue,txns,cats:[],accs:accounts,accObj:acc});
-  };
-
-  // Group accounts by type
-  const groups = ACCOUNT_TYPES.filter(t=>accounts.some(a=>a.type===t.value));
+  if (!currencies.length) return null;
 
   return (
-    <div style={{padding:'16px 16px 32px',maxWidth:680,margin:'0 auto'}}>
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20}}>
-        <h1 style={{margin:0,fontSize:22,fontWeight:700,color:T.t1,letterSpacing:-0.4}}>Accounts</h1>
-        <Btn icon="plus" onClick={()=>setShowAdd(true)}>Add Account</Btn>
+    <div style={{
+      margin: `0 ${SPACE.lg}px ${SPACE.lg}px`,
+      background: 'linear-gradient(145deg, #0f2027, #203a43)',
+      borderRadius: RADIUS.xxl,
+      padding: SPACE.xl,
+      position: 'relative', overflow: 'hidden',
+      boxShadow: '0 8px 32px rgba(0,0,0,0.22)',
+    }}>
+      {/* Decoration */}
+      <div style={{
+        position: 'absolute', top: -30, right: -30, width: 130, height: 130,
+        borderRadius: '50%', background: 'rgba(255,255,255,0.04)', pointerEvents: 'none',
+      }} />
+
+      <div style={{
+        fontSize: '11px', fontWeight: 600, color: 'rgba(255,255,255,0.45)',
+        fontFamily: FONT.family, letterSpacing: '1.2px',
+        textTransform: 'uppercase', marginBottom: SPACE.md,
+      }}>
+        Total Net Worth
       </div>
 
-      {/* Net worth cards */}
-      {Object.keys(totals).length>0 && (
-        <Group label="Net Worth">
-          {Object.entries(totals).map(([cur,total],i,arr)=>{
-            const sym = CURRENCIES.find(c=>c.code===cur)?.symbol||cur;
-            const neg = total<0;
-            return (
-              <Row key={cur} label={`${cur} Total`}
-                value={<span style={{fontSize:17,fontWeight:700,color:neg?T.red:T.t1,letterSpacing:-0.3}}>{neg?'-':''}{sym}{Math.abs(total).toLocaleString(undefined,{minimumFractionDigits:2})}</span>}
-                last={i===arr.length-1}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: SPACE.sm }}>
+        {currencies.map((c, i) => (
+          <div key={c} style={{ display: 'flex', alignItems: 'baseline', gap: SPACE.sm }}>
+            <span style={{
+              fontSize: i === 0 ? '34px' : '22px',
+              fontWeight: 700, color: '#fff',
+              fontFamily: FONT.family, letterSpacing: '-1px',
+              fontVariantNumeric: 'tabular-nums',
+              lineHeight: 1.1,
+            }}>
+              {formatAmount(worth[c], c)}
+            </span>
+            <span style={{
+              fontSize: i === 0 ? '14px' : '12px',
+              fontWeight: 600, color: 'rgba(255,255,255,0.45)',
+              fontFamily: FONT.family, letterSpacing: '0.5px',
+            }}>
+              {c}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <div style={{
+        marginTop: SPACE.lg,
+        fontSize: FONT.caption1.size, color: 'rgba(255,255,255,0.35)',
+        fontFamily: FONT.family,
+      }}>
+        {accounts.length} account{accounts.length !== 1 ? 's' : ''}
+      </div>
+    </div>
+  );
+}
+
+// ─── Account Row ──────────────────────────────────────────────────────────────
+function AccountRow({ account, onPress, isHidden, onToggleHide, last }) {
+  const [pressed, setPressed] = useState(false);
+  const meta = TYPE_META[account.type] || TYPE_META.bank;
+
+  return (
+    <>
+      <button
+        onClick={() => onPress(account)}
+        onMouseDown={() => setPressed(true)}
+        onMouseUp={() => setPressed(false)}
+        onMouseLeave={() => setPressed(false)}
+        style={{
+          width: '100%', display: 'flex', alignItems: 'center', gap: SPACE.md,
+          padding: `${SPACE.md}px ${SPACE.lg}px`,
+          background: pressed ? COLORS.fillTertiary : 'transparent',
+          border: 'none', cursor: 'pointer', textAlign: 'left',
+          transition: `background ${ANIM.fast}ms`,
+          WebkitTapHighlightColor: 'transparent',
+        }}
+      >
+        {/* Icon blob */}
+        <div style={{
+          width: 44, height: 44, borderRadius: RADIUS.lg,
+          background: `${account.color || meta.color}18`,
+          border: `1.5px solid ${account.color || meta.color}25`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          flexShrink: 0,
+        }}>
+          <Icon name={meta.icon} size={20} color={account.color || meta.color} strokeWidth={1.75} />
+        </div>
+
+        {/* Info */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{
+            fontSize: FONT.callout.size, fontWeight: FONT.semibold,
+            color: COLORS.labelPrimary, fontFamily: FONT.family,
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>
+            {account.name}
+          </div>
+          <div style={{
+            fontSize: FONT.caption1.size, color: COLORS.labelTertiary,
+            fontFamily: FONT.family, marginTop: 2,
+            textTransform: 'uppercase', letterSpacing: '0.4px',
+          }}>
+            {meta.label.replace('s', '')} · {account.currency}
+          </div>
+        </div>
+
+        {/* Balance + hide toggle */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: SPACE.sm, flexShrink: 0 }}>
+          <div style={{ textAlign: 'right' }}>
+            {isHidden ? (
+              <div style={{ fontSize: '16px', letterSpacing: '4px', color: COLORS.labelTertiary }}>••••</div>
+            ) : (
+              <>
+                <div style={{
+                  fontSize: FONT.callout.size, fontWeight: FONT.bold,
+                  color: account.balance < 0 ? COLORS.expense : COLORS.labelPrimary,
+                  fontFamily: FONT.family, fontVariantNumeric: 'tabular-nums',
+                }}>
+                  {formatAmount(account.balance, account.currency)}
+                </div>
+                <div style={{
+                  fontSize: '10px', fontWeight: 600, color: COLORS.labelQuaternary,
+                  fontFamily: FONT.family, letterSpacing: '0.5px', marginTop: 1,
+                }}>
+                  {account.currency}
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Hide/show */}
+          <button
+            onClick={e => { e.stopPropagation(); onToggleHide(account.id); }}
+            style={{
+              width: 30, height: 30, borderRadius: RADIUS.full,
+              background: COLORS.fillTertiary, border: 'none',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer', flexShrink: 0,
+              WebkitTapHighlightColor: 'transparent',
+            }}
+          >
+            <Icon name={isHidden ? 'EyeOff' : 'Eye'} size={14} color={COLORS.labelTertiary} strokeWidth={2} />
+          </button>
+
+          <Icon name="ChevronRight" size={14} color={COLORS.labelQuaternary} strokeWidth={2.5} />
+        </div>
+      </button>
+      {!last && <div style={{ height: '0.5px', background: COLORS.separatorOpaque, marginLeft: 72 }} />}
+    </>
+  );
+}
+
+// ─── Add Account Form ─────────────────────────────────────────────────────────
+function AddAccountSheet({ open, onClose, onSave, saving }) {
+  const [name,    setName]    = useState('');
+  const [type,    setType]    = useState('bank');
+  const [balance, setBalance] = useState('');
+  const [currency, setCurrency] = useState(DEFAULT_CURRENCY);
+  const [color,   setColor]   = useState(COLORS.blue);
+  const [errors,  setErrors]  = useState({});
+
+  const COLORS_PRESET = [
+    '#007AFF','#34C759','#FF9500','#FF3B30','#5856D6',
+    '#FF2D55','#AF52DE','#5AC8FA','#FFCC00','#A2845E',
+  ];
+
+  const validate = () => {
+    const e = {};
+    if (!name.trim())                    e.name    = 'Enter account name';
+    if (isNaN(parseFloat(balance)))      e.balance = 'Enter a valid balance';
+    setErrors(e);
+    return !Object.keys(e).length;
+  };
+
+  const handleSave = () => {
+    if (!validate()) return;
+    onSave({ name: name.trim(), type, balance: parseFloat(balance), currency, color });
+  };
+
+  const reset = () => {
+    setName(''); setType('bank'); setBalance(''); setCurrency(DEFAULT_CURRENCY);
+    setColor(COLORS.blue); setErrors({});
+  };
+
+  return (
+    <BottomSheet open={open} onClose={() => { onClose(); reset(); }} title="New Account" height={620}>
+      <div style={{ padding: `0 ${SPACE.lg}px ${SPACE.xl}px`, display: 'flex', flexDirection: 'column', gap: SPACE.md }}>
+
+        {/* Name */}
+        <div>
+          <label style={{ fontSize: FONT.footnote.size, fontWeight: FONT.semibold, color: COLORS.labelSecondary, fontFamily: FONT.family, letterSpacing: '0.5px', textTransform: 'uppercase' }}>
+            Account Name
+          </label>
+          <input
+            value={name} onChange={e => setName(e.target.value)}
+            placeholder="e.g. NBK Current"
+            style={{
+              width: '100%', marginTop: 6,
+              padding: `${SPACE.md}px`, borderRadius: RADIUS.lg,
+              border: `1.5px solid ${errors.name ? COLORS.red : COLORS.separatorOpaque}`,
+              fontSize: FONT.callout.size, fontFamily: FONT.family,
+              color: COLORS.labelPrimary, background: COLORS.bgPrimary,
+              outline: 'none', boxSizing: 'border-box',
+            }}
+          />
+          {errors.name && <div style={{ color: COLORS.red, fontSize: FONT.caption1.size, fontFamily: FONT.family, marginTop: 4 }}>{errors.name}</div>}
+        </div>
+
+        {/* Type */}
+        <div>
+          <label style={{ fontSize: FONT.footnote.size, fontWeight: FONT.semibold, color: COLORS.labelSecondary, fontFamily: FONT.family, letterSpacing: '0.5px', textTransform: 'uppercase' }}>
+            Type
+          </label>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: SPACE.sm, marginTop: 6 }}>
+            {ACCOUNT_TYPES.map(t => (
+              <button
+                key={t.value}
+                onClick={() => setType(t.value)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '7px 12px', borderRadius: RADIUS.full,
+                  background: type === t.value ? COLORS.blue : COLORS.fillTertiary,
+                  border: 'none', cursor: 'pointer',
+                  fontSize: '13px', fontWeight: FONT.medium,
+                  color: type === t.value ? '#fff' : COLORS.labelSecondary,
+                  fontFamily: FONT.family,
+                  transition: `all ${ANIM.fast}ms`,
+                  WebkitTapHighlightColor: 'transparent',
+                }}
+              >
+                <Icon name={t.icon} size={13} color={type === t.value ? '#fff' : COLORS.labelSecondary} strokeWidth={2} />
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Balance + Currency */}
+        <div style={{ display: 'flex', gap: SPACE.md }}>
+          <div style={{ flex: 1 }}>
+            <label style={{ fontSize: FONT.footnote.size, fontWeight: FONT.semibold, color: COLORS.labelSecondary, fontFamily: FONT.family, letterSpacing: '0.5px', textTransform: 'uppercase' }}>
+              Opening Balance
+            </label>
+            <input
+              type="number" inputMode="decimal"
+              value={balance} onChange={e => setBalance(e.target.value)}
+              placeholder="0.000"
+              style={{
+                width: '100%', marginTop: 6,
+                padding: `${SPACE.md}px`, borderRadius: RADIUS.lg,
+                border: `1.5px solid ${errors.balance ? COLORS.red : COLORS.separatorOpaque}`,
+                fontSize: '20px', fontWeight: 600, fontFamily: FONT.family,
+                color: COLORS.labelPrimary, background: COLORS.bgPrimary,
+                outline: 'none', textAlign: 'right', boxSizing: 'border-box',
+                fontVariantNumeric: 'tabular-nums',
+              }}
+            />
+            {errors.balance && <div style={{ color: COLORS.red, fontSize: FONT.caption1.size, fontFamily: FONT.family, marginTop: 4 }}>{errors.balance}</div>}
+          </div>
+          <div style={{ width: 100 }}>
+            <label style={{ fontSize: FONT.footnote.size, fontWeight: FONT.semibold, color: COLORS.labelSecondary, fontFamily: FONT.family, letterSpacing: '0.5px', textTransform: 'uppercase' }}>
+              Currency
+            </label>
+            <select
+              value={currency} onChange={e => setCurrency(e.target.value)}
+              style={{
+                width: '100%', marginTop: 6,
+                padding: `${SPACE.md}px`, borderRadius: RADIUS.lg,
+                border: `1.5px solid ${COLORS.separatorOpaque}`,
+                fontSize: FONT.callout.size, fontFamily: FONT.family,
+                color: COLORS.labelPrimary, background: COLORS.bgPrimary,
+                outline: 'none',
+              }}
+            >
+              {CURRENCIES.map(c => (
+                <option key={c.code} value={c.code}>{c.code} — {c.name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Color */}
+        <div>
+          <label style={{ fontSize: FONT.footnote.size, fontWeight: FONT.semibold, color: COLORS.labelSecondary, fontFamily: FONT.family, letterSpacing: '0.5px', textTransform: 'uppercase' }}>
+            Color
+          </label>
+          <div style={{ display: 'flex', gap: 10, marginTop: 8, flexWrap: 'wrap' }}>
+            {COLORS_PRESET.map(c => (
+              <button
+                key={c}
+                onClick={() => setColor(c)}
+                style={{
+                  width: 32, height: 32, borderRadius: RADIUS.full,
+                  background: c, border: `3px solid ${color === c ? COLORS.labelPrimary : 'transparent'}`,
+                  cursor: 'pointer', boxSizing: 'border-box',
+                  transform: color === c ? 'scale(1.15)' : 'scale(1)',
+                  transition: `transform ${ANIM.fast}ms ${ANIM.spring}`,
+                  WebkitTapHighlightColor: 'transparent',
+                }}
               />
+            ))}
+          </div>
+        </div>
+
+        {/* Save */}
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          style={{
+            marginTop: SPACE.sm,
+            width: '100%', padding: '17px',
+            borderRadius: RADIUS.xl, background: COLORS.blue,
+            border: 'none', cursor: saving ? 'not-allowed' : 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: SPACE.sm,
+            opacity: saving ? 0.6 : 1,
+          }}
+        >
+          {saving
+            ? <Spinner size={20} color="#fff" />
+            : <span style={{ fontSize: '17px', fontWeight: FONT.semibold, color: '#fff', fontFamily: FONT.family }}>Add Account</span>
+          }
+        </button>
+      </div>
+    </BottomSheet>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ACCOUNTS PAGE
+// ─────────────────────────────────────────────────────────────────────────────
+export default function Accounts({ user }) {
+  const navigate = useNavigate();
+  const { accounts, loading, addAccount } = useAccounts(user.uid);
+  const { isHidden, toggle }              = useHiddenBalances(user.uid);
+  const [showAdd, setShowAdd]             = useState(false);
+  const [saving,  setSaving]              = useState(false);
+
+  // Group by type
+  const grouped = useMemo(() => {
+    const map = {};
+    accounts.forEach(a => {
+      const t = a.type || 'bank';
+      if (!map[t]) map[t] = [];
+      map[t].push(a);
+    });
+    return map;
+  }, [accounts]);
+
+  const typeOrder = ['bank','cash','savings','credit','investment','wallet'];
+
+  const handleAdd = async (payload) => {
+    setSaving(true);
+    try { await addAccount(payload); setShowAdd(false); }
+    catch (e) { console.error(e); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div>
+      {/* Header */}
+      <div style={{
+        padding: `${SPACE.xl}px ${SPACE.lg}px ${SPACE.md}px`,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      }}>
+        <h1 style={{
+          margin: 0, fontSize: FONT.largeTitle.size, fontWeight: FONT.bold,
+          color: COLORS.labelPrimary, fontFamily: FONT.family, letterSpacing: '-0.5px',
+        }}>
+          Accounts
+        </h1>
+        <button
+          onClick={() => setShowAdd(true)}
+          style={{
+            width: 36, height: 36, borderRadius: RADIUS.full,
+            background: COLORS.blue, border: 'none',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', boxShadow: SHADOW.md,
+            WebkitTapHighlightColor: 'transparent',
+          }}
+        >
+          <Icon name="Plus" size={18} color="#fff" strokeWidth={2.5} />
+        </button>
+      </div>
+
+      {loading ? (
+        <div style={{ padding: `0 ${SPACE.lg}px`, display: 'flex', flexDirection: 'column', gap: SPACE.md }}>
+          <Skeleton height={160} radius={RADIUS.xxl} />
+          {[1,2,3].map(i => <Skeleton key={i} height={64} radius={RADIUS.xl} />)}
+        </div>
+      ) : accounts.length === 0 ? (
+        <EmptyState
+          icon="Wallet"
+          title="No accounts yet"
+          message="Add your first account to start tracking your finances"
+          action={() => setShowAdd(true)}
+          actionLabel="Add Account"
+        />
+      ) : (
+        <>
+          {/* Net worth */}
+          <NetWorthCard accounts={accounts} />
+
+          {/* Grouped list */}
+          {typeOrder.filter(t => grouped[t]?.length).map(type => {
+            const meta = TYPE_META[type];
+            const accs = grouped[type];
+            return (
+              <div key={type} style={{ margin: `0 ${SPACE.lg}px ${SPACE.lg}px` }}>
+                <div style={{
+                  fontSize: FONT.footnote.size, fontWeight: FONT.semibold,
+                  color: COLORS.labelSecondary, textTransform: 'uppercase',
+                  letterSpacing: '0.8px', fontFamily: FONT.family,
+                  padding: `0 ${SPACE.xs}px ${SPACE.xs}px`,
+                }}>
+                  {meta.label}
+                </div>
+                <div style={{
+                  background: COLORS.surface, borderRadius: RADIUS.xl,
+                  overflow: 'hidden', boxShadow: SHADOW.sm,
+                }}>
+                  {accs.map((acc, i) => (
+                    <AccountRow
+                      key={acc.id}
+                      account={acc}
+                      isHidden={isHidden(acc.id)}
+                      onToggleHide={toggle}
+                      onPress={a => navigate(`/accounts/${a.id}`)}
+                      last={i === accs.length - 1}
+                    />
+                  ))}
+                </div>
+              </div>
             );
           })}
-        </Group>
+        </>
       )}
 
-      {/* Accounts grouped by type */}
-      {accounts.length===0
-        ? <div style={{border:`2px dashed ${T.sep}`,borderRadius:16,padding:'32px'}}><Empty emoji="🏦" title="No accounts yet" sub="Create your first account to get started." action={<Btn onClick={()=>setShowAdd(true)}>Create Account</Btn>}/></div>
-        : groups.map(g=>(
-          <Group key={g.value} label={g.label}>
-            {accounts.filter(a=>a.type===g.value).map((acc,i,arr)=>{
-              const sym    = CURRENCIES.find(c=>c.code===acc.currency)?.symbol||acc.currency;
-              const isHid  = !!hidden[acc.id];
-              const neg    = acc.currentBalance<0;
-              return (
-                <div key={acc.id} style={{display:'flex',alignItems:'center',gap:0,borderBottom:i<arr.length-1?`0.5px solid ${T.sep}`:'none'}}>
-                  <div onClick={()=>openDrill(acc)} style={{flex:1,display:'flex',alignItems:'center',gap:12,padding:'12px 16px',cursor:'pointer',transition:'background 0.1s',minWidth:0}}
-                    onMouseEnter={e=>e.currentTarget.style.background=T.surface2}
-                    onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                    <div style={{width:34,height:34,borderRadius:9,background:(TYPE_COLOR[acc.type]||T.blue)+'15',display:'flex',alignItems:'center',justifyContent:'center',fontSize:18,flexShrink:0}}>
-                      {emoji(acc.type)}
-                    </div>
-                    <div style={{flex:1,minWidth:0}}>
-                      <p style={{margin:0,fontSize:15,color:T.t1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{acc.name}</p>
-                      <p style={{margin:0,fontSize:12,color:T.t3}}>{acc.currency}</p>
-                    </div>
-                    <p style={{
-                      margin:0,fontSize:15,fontWeight:600,color:neg?T.red:T.t1,flexShrink:0,marginRight:4,
-                      filter:isHid?'blur(6px)':'none',userSelect:isHid?'none':'auto',transition:'filter 0.2s',
-                    }}>
-                      {sym}{Math.abs(acc.currentBalance).toLocaleString(undefined,{minimumFractionDigits:2})}
-                    </p>
-                    <Icon name="chevR" size={13} color={T.t4}/>
-                  </div>
-                  {/* Actions */}
-                  <div style={{display:'flex',gap:0,padding:'0 10px',borderLeft:`0.5px solid ${T.sep}`}}>
-                    <button onClick={()=>saveHide({...hidden,[acc.id]:!isHid})} style={{background:'none',border:'none',cursor:'pointer',padding:'6px 8px',color:T.t3,display:'flex',alignItems:'center',borderRadius:7}}>
-                      <Icon name={isHid?'eyeOff':'eye'} size={14} color={T.t3}/>
-                    </button>
-                    <button onClick={()=>delAcc(acc)} style={{background:'none',border:'none',cursor:'pointer',padding:'6px 8px',color:T.t3,display:'flex',alignItems:'center',borderRadius:7}}
-                      onMouseEnter={e=>e.currentTarget.style.color=T.red}
-                      onMouseLeave={e=>e.currentTarget.style.color=T.t3}>
-                      <Icon name="trash" size={14} color="currentColor"/>
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </Group>
-        ))
-      }
-
-      <AccountModal user={user} open={showAdd} onClose={()=>setShowAdd(false)}/>
-      <DrillDown ctx={drill} onClose={()=>setDrill(null)}/>
+      <AddAccountSheet
+        open={showAdd}
+        onClose={() => setShowAdd(false)}
+        onSave={handleAdd}
+        saving={saving}
+      />
     </div>
   );
 }

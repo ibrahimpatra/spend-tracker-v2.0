@@ -10,7 +10,7 @@
 // • Auth pages: /login, /register (not wrapped in Layout)
 // ─────────────────────────────────────────────────────────────────────────────
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   BrowserRouter, Routes, Route, Navigate, useLocation,
 } from 'react-router-dom';
@@ -210,14 +210,17 @@ function AuthPage({ onAuth }) {
 function AuthenticatedApp({ user }) {
   const { accounts } = useAccounts(user.uid);
 
+  // Stable reference — inline arrow here causes React to unmount AddTransaction every re-render
+  const AddTransactionComponent = useCallback((props) => (
+    <AddTransaction {...props} key={props.editData?.id || 'new'} />
+  ), []);
+
   return (
     <FilterProvider uid={user.uid}>
       <Layout
         user={user}
         accounts={accounts}
-        AddTransactionComponent={(props) => (
-          <AddTransaction {...props} key={props.editData?.id || 'new'} />
-        )}
+        AddTransactionComponent={AddTransactionComponent}
       >
         <Routes>
           <Route path="/"               element={<Navigate to="/dashboard" replace />} />

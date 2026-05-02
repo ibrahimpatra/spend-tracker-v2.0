@@ -16,8 +16,9 @@ import { useAccounts, useHiddenBalances } from '../hooks/useData';
 import { calcNetWorthByCurrency, formatAmount } from '../utils/currency';
 import {
   Icon, Card, InsetCard, SectionHeader, Separator,
-  BottomSheet, AlertDialog, PillButton, Skeleton, EmptyState, Spinner,
+  BottomSheet, AlertDialog, PillButton, Skeleton, EmptyState, Spinner, toast,
 } from '../components/ui';
+import AddAccountOverlay from '../components/AddAccountOverlay';
 import { openAddTransaction } from '../components/Layout';
 
 // ─── Account type meta ────────────────────────────────────────────────────────
@@ -190,180 +191,6 @@ function AccountRow({ account, onPress, isHidden, onToggleHide, last }) {
   );
 }
 
-// ─── Add Account Form ─────────────────────────────────────────────────────────
-function AddAccountSheet({ open, onClose, onSave, saving }) {
-  const [name,    setName]    = useState('');
-  const [type,    setType]    = useState('bank');
-  const [balance, setBalance] = useState('');
-  const [currency, setCurrency] = useState(DEFAULT_CURRENCY);
-  const [color,   setColor]   = useState(COLORS.blue);
-  const [errors,  setErrors]  = useState({});
-
-  const COLORS_PRESET = [
-    '#007AFF','#34C759','#FF9500','#FF3B30','#5856D6',
-    '#FF2D55','#AF52DE','#5AC8FA','#FFCC00','#A2845E',
-  ];
-
-  const validate = () => {
-    const e = {};
-    if (!name.trim())                    e.name    = 'Enter account name';
-    if (isNaN(parseFloat(balance)))      e.balance = 'Enter a valid balance';
-    setErrors(e);
-    return !Object.keys(e).length;
-  };
-
-  const handleSave = () => {
-    if (!validate()) return;
-    onSave({ name: name.trim(), type, balance: parseFloat(balance), currency, color });
-  };
-
-  const reset = () => {
-    setName(''); setType('bank'); setBalance(''); setCurrency(DEFAULT_CURRENCY);
-    setColor(COLORS.blue); setErrors({});
-  };
-
-  return (
-    <BottomSheet open={open} onClose={() => { onClose(); reset(); }} title="New Account" height={620}>
-      <div style={{ padding: `0 ${SPACE.lg}px ${SPACE.xl}px`, display: 'flex', flexDirection: 'column', gap: SPACE.md }}>
-
-        {/* Name */}
-        <div>
-          <label style={{ fontSize: FONT.footnote.size, fontWeight: FONT.semibold, color: COLORS.labelSecondary, fontFamily: FONT.family, letterSpacing: '0.5px', textTransform: 'uppercase' }}>
-            Account Name
-          </label>
-          <input
-            value={name} onChange={e => setName(e.target.value)}
-            placeholder="e.g. NBK Current"
-            style={{
-              width: '100%', marginTop: 6,
-              padding: `${SPACE.md}px`, borderRadius: RADIUS.lg,
-              border: `1.5px solid ${errors.name ? COLORS.red : COLORS.separatorOpaque}`,
-              fontSize: FONT.callout.size, fontFamily: FONT.family,
-              color: COLORS.labelPrimary, background: COLORS.bgPrimary,
-              outline: 'none', boxSizing: 'border-box',
-            }}
-          />
-          {errors.name && <div style={{ color: COLORS.red, fontSize: FONT.caption1.size, fontFamily: FONT.family, marginTop: 4 }}>{errors.name}</div>}
-        </div>
-
-        {/* Type */}
-        <div>
-          <label style={{ fontSize: FONT.footnote.size, fontWeight: FONT.semibold, color: COLORS.labelSecondary, fontFamily: FONT.family, letterSpacing: '0.5px', textTransform: 'uppercase' }}>
-            Type
-          </label>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: SPACE.sm, marginTop: 6 }}>
-            {ACCOUNT_TYPES.map(t => (
-              <button
-                key={t.value}
-                onClick={() => setType(t.value)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  padding: '7px 12px', borderRadius: RADIUS.full,
-                  background: type === t.value ? COLORS.blue : COLORS.fillTertiary,
-                  border: 'none', cursor: 'pointer',
-                  fontSize: '13px', fontWeight: FONT.medium,
-                  color: type === t.value ? '#fff' : COLORS.labelSecondary,
-                  fontFamily: FONT.family,
-                  transition: `all ${ANIM.fast}ms`,
-                  WebkitTapHighlightColor: 'transparent',
-                }}
-              >
-                <Icon name={t.icon} size={13} color={type === t.value ? '#fff' : COLORS.labelSecondary} strokeWidth={2} />
-                {t.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Balance + Currency */}
-        <div style={{ display: 'flex', gap: SPACE.md }}>
-          <div style={{ flex: 1 }}>
-            <label style={{ fontSize: FONT.footnote.size, fontWeight: FONT.semibold, color: COLORS.labelSecondary, fontFamily: FONT.family, letterSpacing: '0.5px', textTransform: 'uppercase' }}>
-              Opening Balance
-            </label>
-            <input
-              type="number" inputMode="decimal"
-              value={balance} onChange={e => setBalance(e.target.value)}
-              placeholder="0.000"
-              style={{
-                width: '100%', marginTop: 6,
-                padding: `${SPACE.md}px`, borderRadius: RADIUS.lg,
-                border: `1.5px solid ${errors.balance ? COLORS.red : COLORS.separatorOpaque}`,
-                fontSize: '20px', fontWeight: 600, fontFamily: FONT.family,
-                color: COLORS.labelPrimary, background: COLORS.bgPrimary,
-                outline: 'none', textAlign: 'right', boxSizing: 'border-box',
-                fontVariantNumeric: 'tabular-nums',
-              }}
-            />
-            {errors.balance && <div style={{ color: COLORS.red, fontSize: FONT.caption1.size, fontFamily: FONT.family, marginTop: 4 }}>{errors.balance}</div>}
-          </div>
-          <div style={{ width: 100 }}>
-            <label style={{ fontSize: FONT.footnote.size, fontWeight: FONT.semibold, color: COLORS.labelSecondary, fontFamily: FONT.family, letterSpacing: '0.5px', textTransform: 'uppercase' }}>
-              Currency
-            </label>
-            <select
-              value={currency} onChange={e => setCurrency(e.target.value)}
-              style={{
-                width: '100%', marginTop: 6,
-                padding: `${SPACE.md}px`, borderRadius: RADIUS.lg,
-                border: `1.5px solid ${COLORS.separatorOpaque}`,
-                fontSize: FONT.callout.size, fontFamily: FONT.family,
-                color: COLORS.labelPrimary, background: COLORS.bgPrimary,
-                outline: 'none',
-              }}
-            >
-              {CURRENCIES.map(c => (
-                <option key={c.code} value={c.code}>{c.code} — {c.name}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* Color */}
-        <div>
-          <label style={{ fontSize: FONT.footnote.size, fontWeight: FONT.semibold, color: COLORS.labelSecondary, fontFamily: FONT.family, letterSpacing: '0.5px', textTransform: 'uppercase' }}>
-            Color
-          </label>
-          <div style={{ display: 'flex', gap: 10, marginTop: 8, flexWrap: 'wrap' }}>
-            {COLORS_PRESET.map(c => (
-              <button
-                key={c}
-                onClick={() => setColor(c)}
-                style={{
-                  width: 32, height: 32, borderRadius: RADIUS.full,
-                  background: c, border: `3px solid ${color === c ? COLORS.labelPrimary : 'transparent'}`,
-                  cursor: 'pointer', boxSizing: 'border-box',
-                  transform: color === c ? 'scale(1.15)' : 'scale(1)',
-                  transition: `transform ${ANIM.fast}ms ${ANIM.spring}`,
-                  WebkitTapHighlightColor: 'transparent',
-                }}
-              />
-            ))}
-          </div>
-        </div>
-
-        {/* Save */}
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          style={{
-            marginTop: SPACE.sm,
-            width: '100%', padding: '17px',
-            borderRadius: RADIUS.xl, background: COLORS.blue,
-            border: 'none', cursor: saving ? 'not-allowed' : 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: SPACE.sm,
-            opacity: saving ? 0.6 : 1,
-          }}
-        >
-          {saving
-            ? <Spinner size={20} color="#fff" />
-            : <span style={{ fontSize: '17px', fontWeight: FONT.semibold, color: '#fff', fontFamily: FONT.family }}>Add Account</span>
-          }
-        </button>
-      </div>
-    </BottomSheet>
-  );
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ACCOUNTS PAGE
@@ -390,8 +217,11 @@ export default function Accounts({ user }) {
 
   const handleAdd = async (payload) => {
     setSaving(true);
-    try { await addAccount(payload); setShowAdd(false); }
-    catch (e) { console.error(e); }
+    try {
+      await addAccount(payload);
+      setShowAdd(false);
+      toast.show('Account added');
+    } catch (e) { console.error(e); }
     finally { setSaving(false); }
   };
 
@@ -429,6 +259,7 @@ export default function Accounts({ user }) {
         </div>
       ) : accounts.length === 0 ? (
         <EmptyState
+            accentColor={COLORS.blue}
           icon="Wallet"
           title="No accounts yet"
           message="Add your first account to start tracking your finances"
@@ -459,14 +290,15 @@ export default function Accounts({ user }) {
                   overflow: 'hidden', boxShadow: SHADOW.sm,
                 }}>
                   {accs.map((acc, i) => (
-                    <AccountRow
-                      key={acc.id}
-                      account={acc}
-                      isHidden={isHidden(acc.id)}
-                      onToggleHide={toggle}
-                      onPress={a => navigate(`/accounts/${a.id}`)}
-                      last={i === accs.length - 1}
-                    />
+                    <div key={acc.id} style={{ animation: `mv6-fade-in ${ANIM.normal}ms ${ANIM.ease} ${i * 40}ms both` }}>
+                      <AccountRow
+                        account={acc}
+                        isHidden={isHidden(acc.id)}
+                        onToggleHide={toggle}
+                        onPress={a => navigate(`/accounts/${a.id}`)}
+                        last={i === accs.length - 1}
+                      />
+                    </div>
                   ))}
                 </div>
               </div>
@@ -475,12 +307,13 @@ export default function Accounts({ user }) {
         </>
       )}
 
-      <AddAccountSheet
-        open={showAdd}
-        onClose={() => setShowAdd(false)}
-        onSave={handleAdd}
-        saving={saving}
-      />
+      {showAdd && (
+        <AddAccountOverlay
+          onClose={() => setShowAdd(false)}
+          onSave={handleAdd}
+          saving={saving}
+        />
+      )}
     </div>
   );
 }

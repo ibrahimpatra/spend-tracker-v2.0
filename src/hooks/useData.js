@@ -34,6 +34,15 @@ const cacheRead = (key, ttl = CACHE.TTL_MS) => {
   }
 };
 
+const cacheIsFresh = (key, freshMs = 20000) => {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return false;
+    const { ts } = JSON.parse(raw);
+    return Date.now() - ts < freshMs;
+  } catch { return false; }
+};
+
 const cacheDelete = (key) => {
   try { localStorage.removeItem(key); } catch { /* ignore */ }
 };
@@ -54,7 +63,7 @@ const filterHash = (filter) => {
 };
 
 // ─── Firestore timestamp → Date ───────────────────────────────────────────────
-const tsToDate = (ts) => {
+export const tsToDate = (ts) => {
   if (!ts) return new Date();
   if (ts instanceof Date) return ts;
   if (ts.toDate) return ts.toDate();
@@ -70,7 +79,7 @@ export function useAccounts(uid) {
     const cached = cacheRead(CACHE.KEYS.accounts(uid));
     return cached || [];
   });
-  const [loading, setLoading] = useState(!accounts.length);
+  const [loading, setLoading] = useState(!accounts.length && !cacheIsFresh(CACHE.KEYS.accounts(uid)));
 
   useEffect(() => {
     if (!uid) return;
@@ -117,7 +126,7 @@ export function useCategories(uid) {
     const cached = cacheRead(CACHE.KEYS.categories(uid));
     return cached || [];
   });
-  const [loading, setLoading] = useState(!categories.length);
+  const [loading, setLoading] = useState(!categories.length && !cacheIsFresh(CACHE.KEYS.categories(uid)));
 
   useEffect(() => {
     if (!uid) return;
@@ -164,9 +173,11 @@ export function useTransactions(uid, filter) {
   const [transactions, setTransactions] = useState(() => {
     if (!cacheKey) return [];
     const cached = cacheRead(cacheKey);
-    return cached || [];
+    if (!cached) return [];
+    // Restore dateObj as real Date (JSON.stringify serialises it to string/POJO)
+    return cached.map(t => ({ ...t, dateObj: tsToDate(t.dateObj) }));
   });
-  const [loading, setLoading] = useState(!transactions.length);
+  const [loading, setLoading] = useState(!transactions.length && !cacheIsFresh(cacheKey));
 
   useEffect(() => {
     if (!uid || !filter) return;
@@ -182,7 +193,7 @@ export function useTransactions(uid, filter) {
     // Attempt cache first
     const cached = cacheRead(CACHE.KEYS.transactions(uid, hash));
     if (cached) {
-      setTransactions(cached);
+      setTransactions(cached.map(t => ({ ...t, dateObj: tsToDate(t.dateObj) })));
       setLoading(false);
     } else {
       setLoading(true);

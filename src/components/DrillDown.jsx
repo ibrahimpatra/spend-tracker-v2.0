@@ -98,7 +98,7 @@ function TxRow({ t, categories, accounts, index }) {
           {t.note || cat?.name || (isTx ? 'Transfer' : 'Transaction')}
         </div>
         <div style={{ fontSize: FONT.caption1.size, color: COLORS.labelTertiary, fontFamily: FONT.family, marginTop: 2, display: 'flex', gap: 4 }}>
-          <span>{t.dateObj?.toLocaleDateString('default', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+          <span>{safeDate(t.dateObj).toLocaleDateString('default', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
           {acc && <><span>·</span><span style={{ textTransform: 'uppercase', fontSize: '10px' }}>{acc.name}</span></>}
         </div>
       </div>
@@ -175,11 +175,11 @@ function CatDrill({ txns, catObj, allExp, currency }) {
   const daily = useMemo(() => {
     const m = {};
     txns.forEach(t => {
-      const k = t.dateObj?.toLocaleDateString('default', { month: 'short', day: 'numeric' }) || '';
+      const k = safeDate(t.dateObj).toLocaleDateString('default', { month: 'short', day: 'numeric' });
       if (!m[k]) m[k] = { label: k, amount: 0, _d: t.dateObj };
       m[k].amount += t.amount || 0;
     });
-    return Object.values(m).sort((a, b) => a._d - b._d);
+    return Object.values(m).sort((a, b) => safeDate(a._d) - safeDate(b._d));
   }, [txns]);
 
   const total    = txns.reduce((s, t) => s + (t.amount || 0), 0);
@@ -227,19 +227,19 @@ function AccDrill({ txns, accObj, currency }) {
   const runBal = useMemo(() => {
     let bal = accObj?.balance || 0;
     // Walk back to opening
-    const sorted = [...txns].sort((a, b) => b.dateObj - a.dateObj);
+    const sorted = [...txns].sort((a, b) => safeDate(b.dateObj) - safeDate(a.dateObj));
     sorted.forEach(t => {
       if (isIncomeType(t.type))       bal -= t.amount || 0;
       else if (isExpenseType(t.type)) bal += t.amount || 0;
     });
     // Walk forward
-    const fwd = [...txns].sort((a, b) => a.dateObj - b.dateObj);
+    const fwd = [...txns].sort((a, b) => safeDate(a.dateObj) - safeDate(b.dateObj));
     const data = [{ label: 'Start', balance: parseFloat(bal.toFixed(3)) }];
     fwd.forEach(t => {
       if (isIncomeType(t.type))       bal += t.amount || 0;
       else if (isExpenseType(t.type)) bal -= t.amount || 0;
       data.push({
-        label: t.dateObj?.toLocaleDateString('default', { month: 'short', day: 'numeric' }) || '',
+        label: safeDate(t.dateObj).toLocaleDateString('default', { month: 'short', day: 'numeric' }),
         balance: parseFloat(bal.toFixed(3)),
       });
     });
@@ -249,12 +249,12 @@ function AccDrill({ txns, accObj, currency }) {
   const monthly = useMemo(() => {
     const m = {};
     txns.forEach(t => {
-      const k = t.dateObj?.toLocaleString('default', { month: 'short', year: '2-digit' }) || '';
+      const k = safeDate(t.dateObj).toLocaleString('default', { month: 'short', year: '2-digit' });
       if (!m[k]) m[k] = { label: k, income: 0, expense: 0, _d: t.dateObj };
       if (isIncomeType(t.type))       m[k].income  += t.amount || 0;
       else if (isExpenseType(t.type)) m[k].expense += t.amount || 0;
     });
-    return Object.values(m).sort((a, b) => a._d - b._d);
+    return Object.values(m).sort((a, b) => safeDate(a._d) - safeDate(b._d));
   }, [txns]);
 
   return (
@@ -316,7 +316,7 @@ function MonthDrill({ txns, categories, currency }) {
   const daily = useMemo(() => {
     const m = {};
     txns.forEach(t => {
-      const k = t.dateObj?.getDate().toString() || '';
+      const k = safeDate(t.dateObj).getDate().toString();
       if (!m[k]) m[k] = { label: k, income: 0, expense: 0, _d: t.dateObj };
       if (isIncomeType(t.type))       m[k].income  += t.amount || 0;
       else if (isExpenseType(t.type)) m[k].expense += t.amount || 0;
@@ -388,11 +388,11 @@ function TypeDrill({ txns, categories, currency, accentColor }) {
   const monthly = useMemo(() => {
     const m = {};
     txns.forEach(t => {
-      const k = t.dateObj?.toLocaleString('default', { month: 'short', year: '2-digit' }) || '';
+      const k = safeDate(t.dateObj).toLocaleString('default', { month: 'short', year: '2-digit' });
       if (!m[k]) m[k] = { label: k, amount: 0, _d: t.dateObj };
       m[k].amount += t.amount || 0;
     });
-    return Object.values(m).sort((a, b) => a._d - b._d);
+    return Object.values(m).sort((a, b) => safeDate(a._d) - safeDate(b._d));
   }, [txns]);
 
   const catBreak = useMemo(() => {

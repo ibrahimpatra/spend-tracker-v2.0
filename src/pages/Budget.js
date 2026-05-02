@@ -17,7 +17,7 @@ import { useCategories, useTransactions, useBudgets } from '../hooks/useData';
 import { formatAmount } from '../utils/currency';
 import {
   Icon, BottomSheet, AlertDialog, Skeleton, EmptyState, Spinner,
-  SegmentedControl,
+  SegmentedControl, toast,
 } from '../components/ui';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -376,7 +376,7 @@ export default function Budget({ user }) {
 
   const handleSetBudget = async (catId, month, amount) => {
     setSaving(true);
-    try { await setBudget(catId, month, amount); setSetBudgetFor(null); }
+    try { await setBudget(catId, month, amount); setSetBudgetFor(null); toast.show('Budget saved'); }
     catch (e) { console.error(e); }
     finally { setSaving(false); }
   };
@@ -488,6 +488,7 @@ export default function Budget({ user }) {
           message="Add categories first, then set budgets for them"
           action={() => navigate('/categories')}
           actionLabel="Go to Categories"
+          accentColor={COLORS.orange}
         />
       ) : (
         <div style={{ margin: `0 ${SPACE.lg}px` }}>
@@ -554,11 +555,11 @@ export default function Budget({ user }) {
                   <div>
                     <div style={{
                       fontSize: FONT.footnote.size, fontWeight: FONT.semibold,
-                      color: COLORS.labelSecondary, textTransform: 'uppercase',
+                      color: COLORS.labelTertiary, textTransform: 'uppercase',
                       letterSpacing: '0.8px', fontFamily: FONT.family,
                       padding: `0 ${SPACE.xs}px ${SPACE.xs}px`,
                     }}>
-                      No Budget Set
+                      Set a budget
                     </div>
                     <div style={{ background: COLORS.surface, borderRadius: RADIUS.xl, overflow: 'hidden', boxShadow: SHADOW.sm }}>
                       {unset.map((cat, i, arr) => (

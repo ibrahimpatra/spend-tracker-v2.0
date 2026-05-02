@@ -21,8 +21,9 @@ import { useCategories, useTransactions } from '../hooks/useData';
 import { buildCategoryBreakdown, calcStatsByCurrency } from '../utils/currency';
 import {
   Icon, SegmentedControl, BottomSheet, AlertDialog,
-  Skeleton, EmptyState, Spinner, PillButton,
+  Skeleton, EmptyState, Spinner, PillButton, toast,
 } from '../components/ui';
+import AddCategoryOverlay from '../components/AddCategoryOverlay';
 import { openAddTransaction } from '../components/Layout';
 
 // ─── Category Row ─────────────────────────────────────────────────────────────
@@ -98,145 +99,7 @@ function CategoryRow({ cat, amount, currency, percentage, max, onPress, onLongPr
 }
 
 // ─── Add Category Sheet ───────────────────────────────────────────────────────
-function AddCategorySheet({ open, onClose, onSave, saving, defaultType }) {
-  const [name,   setName]   = useState('');
-  const [color,  setColor]  = useState(CATEGORY_COLORS[0]);
-  const [icon,   setIcon]   = useState(CATEGORY_ICONS[0]);
-  const [type,   setType]   = useState(defaultType || 'expense');
-  const [errors, setErrors] = useState({});
-  const [customColor, setCustomColor] = useState('');
 
-  const handleSave = () => {
-    if (!name.trim()) { setErrors({ name: 'Enter a name' }); return; }
-    onSave({ name: name.trim(), color: customColor || color, icon, type });
-  };
-
-  const reset = () => {
-    setName(''); setColor(CATEGORY_COLORS[0]); setIcon(CATEGORY_ICONS[0]);
-    setType(defaultType || 'expense'); setErrors({}); setCustomColor('');
-  };
-
-  return (
-    <BottomSheet open={open} onClose={() => { onClose(); reset(); }} title="New Category" height={600}>
-      <div style={{ padding: `0 ${SPACE.lg}px`, display: 'flex', flexDirection: 'column', gap: SPACE.lg }}>
-
-        {/* Type */}
-        <SegmentedControl
-          options={[{ value: 'expense', label: 'Expense' }, { value: 'income', label: 'Income' }]}
-          value={type} onChange={setType}
-        />
-
-        {/* Name */}
-        <div>
-          <label style={{ fontSize: FONT.footnote.size, fontWeight: FONT.semibold, color: COLORS.labelSecondary, fontFamily: FONT.family, letterSpacing: '0.5px', textTransform: 'uppercase' }}>
-            Name
-          </label>
-          <input
-            value={name} onChange={e => setName(e.target.value)}
-            placeholder="e.g. Groceries"
-            maxLength={32}
-            style={{
-              width: '100%', marginTop: 6, padding: `${SPACE.md}px`,
-              borderRadius: RADIUS.lg,
-              border: `1.5px solid ${errors.name ? COLORS.red : COLORS.separatorOpaque}`,
-              fontSize: FONT.callout.size, fontFamily: FONT.family,
-              color: COLORS.labelPrimary, background: COLORS.bgPrimary,
-              outline: 'none', boxSizing: 'border-box',
-            }}
-          />
-          {errors.name && <div style={{ color: COLORS.red, fontSize: FONT.caption1.size, fontFamily: FONT.family, marginTop: 4 }}>{errors.name}</div>}
-        </div>
-
-        {/* Color */}
-        <div>
-          <label style={{ fontSize: FONT.footnote.size, fontWeight: FONT.semibold, color: COLORS.labelSecondary, fontFamily: FONT.family, letterSpacing: '0.5px', textTransform: 'uppercase' }}>
-            Color
-          </label>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 8, alignItems: 'center' }}>
-            {CATEGORY_COLORS.map(c => (
-              <button key={c} onClick={() => { setColor(c); setCustomColor(''); }} style={{
-                width: 32, height: 32, borderRadius: RADIUS.full, background: c,
-                border: `3px solid ${(customColor || color) === c ? COLORS.labelPrimary : 'transparent'}`,
-                cursor: 'pointer', boxSizing: 'border-box',
-                transform: (customColor || color) === c ? 'scale(1.15)' : 'scale(1)',
-                transition: `transform ${ANIM.fast}ms ${ANIM.spring}`,
-                WebkitTapHighlightColor: 'transparent',
-              }} />
-            ))}
-            {/* Custom color picker */}
-            <label style={{ width: 32, height: 32, borderRadius: RADIUS.full, overflow: 'hidden', cursor: 'pointer', border: `2px dashed ${COLORS.separator}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <input type="color" value={customColor || color} onChange={e => setCustomColor(e.target.value)} style={{ opacity: 0, position: 'absolute', pointerEvents: 'none' }} />
-              <Icon name="Plus" size={14} color={COLORS.labelTertiary} strokeWidth={2} />
-            </label>
-          </div>
-        </div>
-
-        {/* Icon grid */}
-        <div>
-          <label style={{ fontSize: FONT.footnote.size, fontWeight: FONT.semibold, color: COLORS.labelSecondary, fontFamily: FONT.family, letterSpacing: '0.5px', textTransform: 'uppercase' }}>
-            Icon
-          </label>
-          <div style={{
-            display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)',
-            gap: SPACE.sm, marginTop: 8,
-          }}>
-            {CATEGORY_ICONS.map(ic => (
-              <button
-                key={ic}
-                onClick={() => setIcon(ic)}
-                style={{
-                  aspectRatio: '1', borderRadius: RADIUS.lg,
-                  background: icon === ic ? `${customColor || color}25` : COLORS.fillTertiary,
-                  border: `1.5px solid ${icon === ic ? (customColor || color) + '60' : 'transparent'}`,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  cursor: 'pointer', padding: 0,
-                  transition: `all ${ANIM.fast}ms`,
-                  WebkitTapHighlightColor: 'transparent',
-                }}
-              >
-                <Icon name={ic} size={18} color={icon === ic ? (customColor || color) : COLORS.labelSecondary} strokeWidth={1.75} />
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Preview + Save */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: SPACE.md }}>
-          <div style={{
-            width: 48, height: 48, borderRadius: RADIUS.lg,
-            background: `${customColor || color}20`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            <Icon name={icon} size={24} color={customColor || color} strokeWidth={1.75} />
-          </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: FONT.callout.size, fontWeight: FONT.semibold, color: COLORS.labelPrimary, fontFamily: FONT.family }}>
-              {name || 'Category Name'}
-            </div>
-            <div style={{ fontSize: FONT.caption1.size, color: COLORS.labelTertiary, fontFamily: FONT.family }}>Preview</div>
-          </div>
-        </div>
-
-        <button
-          onClick={handleSave} disabled={saving}
-          style={{
-            width: '100%', padding: '17px', borderRadius: RADIUS.xl,
-            background: COLORS.blue, border: 'none',
-            cursor: saving ? 'not-allowed' : 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            opacity: saving ? 0.6 : 1, marginBottom: SPACE.xl,
-          }}
-        >
-          {saving ? <Spinner size={20} color="#fff" /> : <span style={{ fontSize: '17px', fontWeight: FONT.semibold, color: '#fff', fontFamily: FONT.family }}>Add Category</span>}
-        </button>
-      </div>
-    </BottomSheet>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CATEGORIES PAGE
-// ─────────────────────────────────────────────────────────────────────────────
 export default function Categories({ user }) {
   const navigate   = useNavigate();
   const { filter } = useFilter();
@@ -302,7 +165,7 @@ export default function Categories({ user }) {
 
   const handleAdd = async (payload) => {
     setSaving(true);
-    try { await addCategory(payload); setShowAdd(false); }
+    try { await addCategory(payload); setShowAdd(false); toast.show('Category added'); }
     catch (e) { console.error(e); }
     finally { setSaving(false); }
   };
@@ -384,6 +247,7 @@ export default function Categories({ user }) {
         </div>
       ) : tabCategories.length === 0 ? (
         <EmptyState
+            accentColor={COLORS.purple}
           icon="Tag"
           title={`No ${activeTab} categories`}
           message="Add your first category or load the defaults"
@@ -409,13 +273,14 @@ export default function Categories({ user }) {
         </div>
       )}
 
-      <AddCategorySheet
-        open={showAdd}
-        onClose={() => setShowAdd(false)}
-        onSave={handleAdd}
-        saving={saving}
-        defaultType={activeTab}
-      />
+      {showAdd && (
+        <AddCategoryOverlay
+          onClose={() => setShowAdd(false)}
+          onSave={handleAdd}
+          saving={saving}
+          defaultType={activeTab}
+        />
+      )}
 
       <AlertDialog
         open={!!deleteTarget}

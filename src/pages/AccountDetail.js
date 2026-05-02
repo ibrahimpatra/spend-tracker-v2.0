@@ -48,7 +48,7 @@ function ChartTooltip({ active, payload, label, currency }) {
   if (!active || !payload?.length) return null;
   return (
     <div style={{
-      background: 'rgba(28,28,30,0.92)', backdropFilter: 'blur(12px)',
+      background: 'var(--mv6-surface-overlay, rgba(28,28,30,0.92))', backdropFilter: 'blur(12px)',
       borderRadius: RADIUS.lg, padding: '10px 14px', boxShadow: SHADOW.lg,
     }}>
       <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)', fontFamily: FONT.family, marginBottom: 4 }}>{label}</div>
@@ -94,7 +94,7 @@ function TxRow({ t, categories, index }) {
           {t.note || cat?.name || (isTx ? 'Transfer' : 'Transaction')}
         </div>
         <div style={{ fontSize: FONT.caption1.size, color: COLORS.labelTertiary, fontFamily: FONT.family, marginTop: 2 }}>
-          {t.dateObj?.toLocaleDateString('default', { weekday: 'short', month: 'short', day: 'numeric' })}
+          {safeDate(t.dateObj).toLocaleDateString('default', { weekday: 'short', month: 'short', day: 'numeric' })}
         </div>
       </div>
       <div style={{ textAlign: 'right', flexShrink: 0 }}>
@@ -116,6 +116,16 @@ function TxRow({ t, categories, index }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // ACCOUNT DETAIL PAGE
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ─── Safe date helper ────────────────────────────────────────────────────────
+const safeDate = (d) => {
+  if (!d) return new Date();
+  if (d instanceof Date) return d;
+  if (typeof d.toDate === 'function') return d.toDate();
+  if (typeof d.seconds === 'number') return new Date(d.seconds * 1000);
+  const p = new Date(d); return isNaN(p) ? new Date() : p;
+};
+
 export default function AccountDetail({ user }) {
   const { id }       = useParams();
   const navigate     = useNavigate();
@@ -183,7 +193,7 @@ export default function AccountDetail({ user }) {
       if (isInc || isTxTo)        running += (t.amount || 0);
       else if (isExp || isTxFrom) running -= (t.amount || 0);
 
-      const label = t.dateObj?.toLocaleDateString('default', { month: 'short', day: 'numeric' }) || '';
+      const label = safeDate(t.dateObj).toLocaleDateString('default', { month: 'short', day: 'numeric' });
       data.push({ date: label, balance: parseFloat(running.toFixed(3)) });
     });
 

@@ -19,8 +19,10 @@ import {
 import { useAccounts, useCategories, useTransactions, tsToDate } from '../hooks/useData';
 import { formatAmount } from '../utils/currency';
 import {
-  Icon, BottomSheet, SegmentedControl, AlertDialog, Spinner,
+  Icon, BottomSheet, SegmentedControl, AlertDialog, Spinner, toast,
 } from './ui';
+import AddAccountOverlay  from './AddAccountOverlay';
+import AddCategoryOverlay from './AddCategoryOverlay';
 
 // ─── safeDate — converts anything to a JS Date ────────────────────────────────
 const safeDate = (v) => {
@@ -292,18 +294,15 @@ function CurrencySelector({ value, onChange }) {
 export default function AddTransaction({ user, editData, onClose }) {
   const isEdit = !!editData;
 
-  const { accounts }   = useAccounts(user.uid);
-  const { categories } = useCategories(user.uid);
+  const { accounts, addAccount }   = useAccounts(user.uid);
+  const { categories, addCategory } = useCategories(user.uid);
   const { addTransaction, editTransaction, deleteTransaction } = useTransactions(user.uid, ALL_TIME_FILTER);
 
-  // ── Derive a safe Date from editData ─────────────────────────────────────
-  // editData.dateObj can be: Date, Firestore Timestamp, {seconds}, ISO string, undefined
   const editDateObj = useMemo(() => {
     if (!isEdit) return new Date();
     return safeDate(editData.dateObj || editData.date);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Type tabs ─────────────────────────────────────────────────────────────
   const [txType, setTxType] = useState(() => {
     if (!isEdit) return TX_TYPES.EXPENSE;
     if ([TX_TYPES.TRANSFER_INT, TX_TYPES.TRANSFER_OUT, TX_TYPES.TRANSFER_IN].includes(editData.type)) return 'transfer';
@@ -314,7 +313,6 @@ export default function AddTransaction({ user, editData, onClose }) {
     isEdit ? (editData.type || TX_TYPES.TRANSFER_INT) : TX_TYPES.TRANSFER_INT
   );
 
-  // ── Form fields ───────────────────────────────────────────────────────────
   const [expression,  setExpression]  = useState(() => isEdit ? String(editData.amount || '') : '');
   const [currency,    setCurrency]    = useState(() => isEdit ? (editData.currency || DEFAULT_CURRENCY) : DEFAULT_CURRENCY);
   const [accountId,   setAccountId]   = useState(() => isEdit ? (editData.accountId || '') : '');
@@ -331,39 +329,35 @@ export default function AddTransaction({ user, editData, onClose }) {
   const [receivedExpr,     setReceivedExpr]     = useState(() => isEdit ? String(editData.receivedAmount || '') : '');
   const [receivedCurrency, setReceivedCurrency] = useState(DEFAULT_CURRENCY);
 
-  // UI state
   const [step,       setStep]       = useState('amount');
   const [saving,     setSaving]     = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   const [errors,     setErrors]     = useState({});
+  const [showNewAcc, setShowNewAcc] = useState(false);
+  const [showNewCat, setShowNewCat] = useState(false);
+  const [savingAcc,  setSavingAcc]  = useState(false);
+  const [savingCat,  setSavingCat]  = useState(false);
 
-  // Auto-set currency from account
   useEffect(() => {
     const acc = accounts.find(a => a.id === accountId);
     if (acc?.currency) setCurrency(acc.currency);
   }, [accountId, accounts]);
 
-  // Auto-set received currency from toAccount
   useEffect(() => {
     const acc = accounts.find(a => a.id === toAccountId);
     if (acc?.currency) setReceivedCurrency(acc.currency);
   }, [toAccountId, accounts]);
 
-  // Auto-select first account if none selected yet
   useEffect(() => {
-    if (!accountId && accounts.length > 0) {
-      setAccountId(accounts[0].id);
-    }
+    if (!accountId && accounts.length > 0) setAccountId(accounts[0].id);
   }, [accounts]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Derived ───────────────────────────────────────────────────────────────
   const amount = useMemo(() => {
     const val = safeEval(expression.replace(/÷/g,'/').replace(/×/g,'*').replace(/−/g,'-'));
     return val !== null ? val : parseFloat(expression) || 0;
   }, [expression]);
 
   const isTransfer = txType === 'transfer';
-
   const isCrossCurrency = isTransfer
     && transferSubType === TX_TYPES.TRANSFER_INT
     && toAccountId
@@ -371,7 +365,6 @@ export default function AddTransaction({ user, editData, onClose }) {
 
   const accent = txType === TX_TYPES.INCOME ? COLORS.income : isTransfer ? COLORS.transfer : COLORS.expense;
 
-  // ── Tab options ───────────────────────────────────────────────────────────
   const tabOptions = [
     { value: TX_TYPES.EXPENSE, label: 'Expense' },
     { value: TX_TYPES.INCOME,  label: 'Income'  },
@@ -383,7 +376,6 @@ export default function AddTransaction({ user, editData, onClose }) {
     { value: TX_TYPES.TRANSFER_IN,  label: 'Received'         },
   ];
 
-  // ── Validate ──────────────────────────────────────────────────────────────
   const validate = () => {
     const errs = {};
     if (!amount || amount <= 0)  errs.amount    = 'Enter a valid amount';
@@ -396,11 +388,9 @@ export default function AddTransaction({ user, editData, onClose }) {
     return !Object.keys(errs).length;
   };
 
-  // ── Save ──────────────────────────────────────────────────────────────────
   const handleSave = async () => {
     if (!validate()) return;
     setSaving(true);
-
     try {
       const dateObj       = new Date(`${date}T${time}`);
       const resolvedType  = isTransfer ? transferSubType : txType;
@@ -417,7 +407,7 @@ export default function AddTransaction({ user, editData, onClose }) {
         ...(receivedAmount !== undefined            ? { receivedAmount } : {}),
         categoryId: isTransfer ? null : (categoryId || null),
         note:       note.trim() || null,
-        date:       Timestamp.fromDate(dateObj),  // static import — no dynamic await
+        date:       Timestamp.fromDate(dateObj),
       };
 
       if (isEdit) {
@@ -425,6 +415,7 @@ export default function AddTransaction({ user, editData, onClose }) {
       } else {
         await addTransaction(payload, accounts);
       }
+      toast.show(isEdit ? 'Transaction updated' : 'Transaction added');
       onClose();
     } catch (err) {
       console.error('Save error:', err);
@@ -434,11 +425,11 @@ export default function AddTransaction({ user, editData, onClose }) {
     }
   };
 
-  // ── Delete ────────────────────────────────────────────────────────────────
   const handleDelete = async () => {
     setSaving(true);
     try {
       await deleteTransaction(editData.id, editData, accounts);
+      toast.show('Transaction deleted', 'error');
       onClose();
     } catch (err) {
       console.error('Delete error:', err);
@@ -447,13 +438,10 @@ export default function AddTransaction({ user, editData, onClose }) {
     }
   };
 
-  // ─────────────────────────────────────────────────────────────────────────
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'flex-end' }}>
-      {/* Backdrop */}
       <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)' }} />
 
-      {/* Sheet */}
       <div style={{
         position: 'relative', width: '100%', maxWidth: 560, margin: '0 auto',
         background: COLORS.bgPrimary,
@@ -462,12 +450,10 @@ export default function AddTransaction({ user, editData, onClose }) {
         animation: `mv6-slide-up ${ANIM.slow}ms ${ANIM.spring} both`,
         boxShadow: '0 -8px 40px rgba(0,0,0,0.2)', overflow: 'hidden',
       }}>
-        {/* Handle */}
         <div style={{ display: 'flex', justifyContent: 'center', padding: '12px 0 0' }}>
           <div style={{ width: 36, height: 4, borderRadius: RADIUS.full, background: COLORS.fillPrimary }} />
         </div>
 
-        {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: `${SPACE.sm}px ${SPACE.lg}px ${SPACE.md}px` }}>
           <span style={{ fontSize: FONT.headline.size, fontWeight: FONT.semibold, color: COLORS.labelPrimary, fontFamily: FONT.family }}>
             {isEdit ? 'Edit Transaction' : 'New Transaction'}
@@ -486,45 +472,31 @@ export default function AddTransaction({ user, editData, onClose }) {
           </div>
         </div>
 
-        {/* Type tabs */}
         <div style={{ padding: `0 ${SPACE.lg}px ${SPACE.md}px` }}>
           <SegmentedControl options={tabOptions} value={txType} onChange={v => { setTxType(v); setCategoryId(null); }} />
         </div>
 
-        {/* Transfer sub-type */}
         {isTransfer && (
           <div style={{ padding: `0 ${SPACE.lg}px ${SPACE.md}px` }}>
             <SegmentedControl options={transferOptions} value={transferSubType} onChange={setTransferSubType} />
           </div>
         )}
 
-        {/* Scrollable body */}
         <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
-
           {step === 'amount' ? (
-            /* ── AMOUNT STEP ───────────────────────────────────────────────── */
             <div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', padding: `0 ${SPACE.xl}px ${SPACE.xs}px`, gap: SPACE.sm }}>
-                <span style={{ fontSize: '13px', color: COLORS.labelTertiary, fontFamily: FONT.family }}>Currency</span>
-                <CurrencySelector value={currency} onChange={setCurrency} />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', padding: `0 ${SPACE.xl}px ${SPACE.xs}px` }}>
+                <span style={{ fontSize: '13px', fontWeight: 600, color: COLORS.labelTertiary, fontFamily: FONT.family, letterSpacing: '0.5px' }}>{currency}</span>
               </div>
-              <Keypad
-                expression={expression}
-                onChange={setExpression}
-                currency={currency}
-                onDone={() => {
-                  if (amount > 0) setStep('details');
-                  else setErrors({ amount: 'Enter an amount first' });
-                }}
+              <Keypad expression={expression} onChange={setExpression} currency={currency}
+                onDone={() => { if (amount > 0) setStep('details'); else setErrors({ amount: 'Enter an amount first' }); }}
               />
               {errors.amount && (
                 <div style={{ textAlign: 'center', padding: SPACE.sm, color: COLORS.red, fontSize: FONT.caption1.size, fontFamily: FONT.family }}>{errors.amount}</div>
               )}
             </div>
           ) : (
-            /* ── DETAILS STEP ──────────────────────────────────────────────── */
             <div>
-              {/* Amount bar — tap to go back to keypad */}
               <button onClick={() => setStep('amount')}
                 style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: `${SPACE.md}px ${SPACE.xl}px`, background: `${accent}10`, border: 'none', cursor: 'pointer', borderBottom: `0.5px solid ${COLORS.separatorOpaque}`, WebkitTapHighlightColor: 'transparent' }}
               >
@@ -540,7 +512,17 @@ export default function AddTransaction({ user, editData, onClose }) {
                 </div>
               </button>
 
-              {/* Details card */}
+              {/* Quick-create account */}
+              {accounts.length === 0 && (
+                <div style={{ margin: `0 ${SPACE.lg}px`, padding: `${SPACE.md}px ${SPACE.lg}px`, background: `${COLORS.orange}10`, borderRadius: RADIUS.xl, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: SPACE.md }}>
+                  <span style={{ fontSize: FONT.subheadline.size, color: COLORS.labelSecondary, fontFamily: FONT.family }}>No accounts yet</span>
+                  <button onClick={() => setShowNewAcc(true)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: RADIUS.full, background: COLORS.blue, border: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                    <Icon name="Plus" size={12} color="#fff" strokeWidth={2.5} />
+                    <span style={{ fontSize: '12px', fontWeight: 600, color: '#fff', fontFamily: FONT.family }}>Add Account</span>
+                  </button>
+                </div>
+              )}
+
               <div style={{ margin: SPACE.lg, background: COLORS.surface, borderRadius: RADIUS.xl, overflow: 'hidden' }}>
                 <AccountSelector accounts={accounts} value={accountId} onChange={setAccountId}
                   label={isTransfer && transferSubType === TX_TYPES.TRANSFER_INT ? 'From Account' : 'Account'} />
@@ -558,7 +540,7 @@ export default function AddTransaction({ user, editData, onClose }) {
                     <div style={{ padding: `${SPACE.md}px ${SPACE.lg}px` }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: SPACE.sm }}>
                         <span style={{ fontSize: FONT.callout.size, color: COLORS.labelSecondary, fontFamily: FONT.family }}>Received Amount</span>
-                        <CurrencySelector value={receivedCurrency} onChange={setReceivedCurrency} />
+                        <span style={{ fontSize: '13px', fontWeight: 600, color: COLORS.labelTertiary, fontFamily: FONT.family }}>{receivedCurrency}</span>
                       </div>
                       <input type="number" inputMode="decimal" value={receivedExpr} onChange={e => setReceivedExpr(e.target.value)} placeholder="0.000"
                         style={{ width: '100%', padding: `${SPACE.md}px`, borderRadius: RADIUS.lg, border: `1.5px solid ${errors.received ? COLORS.red : COLORS.separatorOpaque}`, fontSize: '22px', fontWeight: 600, color: COLORS.labelPrimary, fontFamily: FONT.family, background: COLORS.bgPrimary, outline: 'none', textAlign: 'right', boxSizing: 'border-box', fontVariantNumeric: 'tabular-nums' }}
@@ -568,8 +550,6 @@ export default function AddTransaction({ user, editData, onClose }) {
                 )}
 
                 <div style={{ height: '0.5px', background: COLORS.separatorOpaque, marginLeft: SPACE.lg }} />
-
-                {/* Date */}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: `${SPACE.md}px ${SPACE.lg}px` }}>
                   <span style={{ fontSize: FONT.callout.size, color: COLORS.labelSecondary, fontFamily: FONT.family }}>Date</span>
                   <input type="date" value={date} onChange={e => setDate(e.target.value)}
@@ -577,8 +557,6 @@ export default function AddTransaction({ user, editData, onClose }) {
                 </div>
 
                 <div style={{ height: '0.5px', background: COLORS.separatorOpaque, marginLeft: SPACE.lg }} />
-
-                {/* Time */}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: `${SPACE.md}px ${SPACE.lg}px` }}>
                   <span style={{ fontSize: FONT.callout.size, color: COLORS.labelSecondary, fontFamily: FONT.family }}>Time</span>
                   <input type="time" value={time} onChange={e => setTime(e.target.value)}
@@ -586,8 +564,6 @@ export default function AddTransaction({ user, editData, onClose }) {
                 </div>
 
                 <div style={{ height: '0.5px', background: COLORS.separatorOpaque, marginLeft: SPACE.lg }} />
-
-                {/* Note */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: SPACE.sm, padding: `${SPACE.md}px ${SPACE.lg}px` }}>
                   <Icon name="FileText" size={16} color={COLORS.labelTertiary} strokeWidth={2} />
                   <input type="text" value={note} onChange={e => setNote(e.target.value)} placeholder="Add a note…" maxLength={120}
@@ -595,11 +571,14 @@ export default function AddTransaction({ user, editData, onClose }) {
                 </div>
               </div>
 
-              {/* Category grid */}
               {!isTransfer && (
                 <div>
-                  <div style={{ padding: `0 ${SPACE.lg}px ${SPACE.xs}px`, fontSize: FONT.footnote.size, fontWeight: FONT.semibold, color: COLORS.labelSecondary, textTransform: 'uppercase', letterSpacing: '0.8px', fontFamily: FONT.family }}>
-                    Category
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: `0 ${SPACE.lg}px ${SPACE.xs}px` }}>
+                    <span style={{ fontSize: FONT.footnote.size, fontWeight: FONT.semibold, color: COLORS.labelSecondary, textTransform: 'uppercase', letterSpacing: '0.8px', fontFamily: FONT.family }}>Category</span>
+                    <button onClick={() => setShowNewCat(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: RADIUS.full, background: COLORS.fillTertiary, border: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+                      <Icon name="Plus" size={11} color={COLORS.labelSecondary} strokeWidth={2.5} />
+                      <span style={{ fontSize: '11px', fontWeight: 600, color: COLORS.labelSecondary, fontFamily: FONT.family }}>New</span>
+                    </button>
                   </div>
                   <CategoryGrid categories={categories} selected={categoryId} onSelect={setCategoryId} txType={txType} />
                 </div>
@@ -609,7 +588,6 @@ export default function AddTransaction({ user, editData, onClose }) {
                 <div style={{ padding: `0 ${SPACE.lg}px ${SPACE.md}px`, color: COLORS.red, fontSize: FONT.footnote.size, fontFamily: FONT.family, textAlign: 'center' }}>{errors.submit}</div>
               )}
 
-              {/* Save button */}
               <div style={{ padding: `${SPACE.md}px ${SPACE.lg}px`, paddingBottom: `max(${SPACE.xl}px, env(safe-area-inset-bottom, 20px))` }}>
                 <button onClick={handleSave} disabled={saving}
                   style={{ width: '100%', padding: '17px', borderRadius: RADIUS.xl, background: saving ? `${accent}60` : accent, border: 'none', cursor: saving ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: SPACE.sm, WebkitTapHighlightColor: 'transparent' }}
@@ -634,6 +612,41 @@ export default function AddTransaction({ user, editData, onClose }) {
         confirmLabel="Delete" confirmDestructive
         onConfirm={handleDelete}
       />
+
+      {showNewAcc && (
+        <AddAccountOverlay
+          onClose={() => setShowNewAcc(false)}
+          saving={savingAcc}
+          onSave={async (payload) => {
+            setSavingAcc(true);
+            try {
+              const id = await addAccount(payload);
+              if (id) setAccountId(id);
+              setShowNewAcc(false);
+              toast.show('Account created');
+            } catch(e) { console.error(e); }
+            finally { setSavingAcc(false); }
+          }}
+        />
+      )}
+
+      {showNewCat && (
+        <AddCategoryOverlay
+          onClose={() => setShowNewCat(false)}
+          saving={savingCat}
+          defaultType={txType === 'income' ? 'income' : 'expense'}
+          onSave={async (payload) => {
+            setSavingCat(true);
+            try {
+              const id = await addCategory(payload);
+              if (id) setCategoryId(id);
+              setShowNewCat(false);
+              toast.show('Category created');
+            } catch(e) { console.error(e); }
+            finally { setSavingCat(false); }
+          }}
+        />
+      )}
     </div>
   );
 }

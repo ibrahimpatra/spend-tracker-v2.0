@@ -29,6 +29,15 @@ import {
 } from '../components/ui';
 import { openAddTransaction } from '../components/Layout';
 
+// ─── Safe date helper (handles Firestore Timestamps, POJOs, strings, Dates) ────
+const safeDate = (d) => {
+  if (!d) return new Date();
+  if (d instanceof Date) return d;
+  if (typeof d.toDate === 'function') return d.toDate();
+  if (typeof d.seconds === 'number') return new Date(d.seconds * 1000);
+  const p = new Date(d); return isNaN(p) ? new Date() : p;
+};
+
 // ─── Greeting ─────────────────────────────────────────────────────────────────
 function greeting() {
   const h = new Date().getHours();
@@ -52,14 +61,17 @@ function HeroCard({ currency, balance, stats, isHidden, onToggleHide, index }) {
 
   return (
     <div style={{
-      minWidth: 300,
+      // Viewport-relative: fills 86vw on mobile so peek is natural,
+      // caps at 360px on desktop — no more fixed 300px that breaks at 375px screens
+      width: 'min(86vw, 360px)',
+      minWidth: 0,
       background: `linear-gradient(145deg, ${g1}, ${g2})`,
       borderRadius: RADIUS.xxl,
       padding: SPACE.xl,
       position: 'relative',
       overflow: 'hidden',
       flexShrink: 0,
-      boxShadow: '0 8px 32px rgba(0,0,0,0.24)',
+      boxShadow: '0 8px 40px rgba(0,0,0,0.32)',
     }}>
       {/* Decorative circle */}
       <div style={{
@@ -177,7 +189,7 @@ function CashFlowChart({ transactions, currency }) {
     if (!active || !payload?.length) return null;
     return (
       <div style={{
-        background: 'rgba(28,28,30,0.92)',
+        background: 'var(--mv6-surface-overlay, rgba(28,28,30,0.92))',
         backdropFilter: 'blur(12px)',
         borderRadius: RADIUS.lg,
         padding: '10px 14px',
@@ -363,7 +375,7 @@ function RecentTxRow({ t, accounts, categories, onPress, index }) {
           display: 'flex', alignItems: 'center', gap: 4,
         }}>
           <span>
-            {t.dateObj?.toLocaleDateString('default', { month: 'short', day: 'numeric' })}
+            {safeDate(t.dateObj).toLocaleDateString('default', { month: 'short', day: 'numeric' })}
           </span>
           {acc && (
             <>
@@ -477,16 +489,60 @@ export default function Dashboard({ user }) {
   const isLoading = accLoading || txLoading;
   const filterLabel = getFilterLabel(filter);
 
-  // ── Hero card scroll ──────────────────────────────────────────────────────────
+  // ── Hero card scroll + mouse drag ────────────────────────────────────────────
   const scrollRef = useRef(null);
   const [heroIndex, setHeroIndex] = useState(0);
+  const dragRef = useRef({ active: false, startX: 0, scrollLeft: 0 });
 
   const handleScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
-    const idx = Math.round(el.scrollLeft / 316);
-    setHeroIndex(idx);
-    if (currencies[idx]) setActiveCurrency(currencies[idx]);
+    const children = Array.from(el.children);
+    const centerX = el.scrollLeft + el.clientWidth / 2;
+    let bestIdx = 0, bestDist = Infinity;
+    children.forEach((child, i) => {
+      const mid = child.offsetLeft + child.offsetWidth / 2;
+      const dist = Math.abs(mid - centerX);
+      if (dist < bestDist) { bestDist = dist; bestIdx = i; }
+    });
+    setHeroIndex(bestIdx);
+    if (currencies[bestIdx]) setActiveCurrency(currencies[bestIdx]);
+  };
+
+  // Mouse drag handlers for desktop
+  const onMouseDown = (e) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    dragRef.current = { active: true, startX: e.pageX - el.offsetLeft, scrollLeft: el.scrollLeft };
+    el.style.cursor = 'grabbing';
+    el.style.scrollBehavior = 'auto';
+  };
+  const onMouseMove = (e) => {
+    if (!dragRef.current.active) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    e.preventDefault();
+    const x = e.pageX - el.offsetLeft;
+    const walk = (x - dragRef.current.startX) * 1.4;
+    el.scrollLeft = dragRef.current.scrollLeft - walk;
+  };
+  const onMouseUp = () => {
+    dragRef.current.active = false;
+    const el = scrollRef.current;
+    if (!el) return;
+    el.style.cursor = 'grab';
+    el.style.scrollBehavior = '';
+    // Snap to nearest card
+    const children = Array.from(el.children);
+    const centerX = el.scrollLeft + el.clientWidth / 2;
+    let bestIdx = 0, bestDist = Infinity;
+    children.forEach((child, i) => {
+      const mid = child.offsetLeft + child.offsetWidth / 2;
+      const dist = Math.abs(mid - centerX);
+      if (dist < bestDist) { bestDist = dist; bestIdx = i; }
+    });
+    const target = children[bestIdx];
+    if (target) el.scrollTo({ left: target.offsetLeft - (el.clientWidth - target.offsetWidth) / 2, behavior: 'smooth' });
   };
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -544,6 +600,7 @@ export default function Dashboard({ user }) {
             message="Add your first account to start tracking"
             action={() => navigate('/accounts')}
             actionLabel="Add Account"
+            accentColor={COLORS.blue}
           />
         </div>
       ) : (
@@ -551,17 +608,25 @@ export default function Dashboard({ user }) {
           <div
             ref={scrollRef}
             onScroll={handleScroll}
+            onMouseDown={onMouseDown}
+            onMouseMove={onMouseMove}
+            onMouseUp={onMouseUp}
+            onMouseLeave={onMouseUp}
+            className="mv6-hero-scroll"
             style={{
-              display: 'flex', gap: SPACE.md,
-              padding: `0 ${SPACE.lg}px`,
+              display: 'flex', gap: 12,
+              padding: `4px ${SPACE.lg}px 8px`,
               overflowX: 'auto', scrollbarWidth: 'none',
               scrollSnapType: 'x mandatory',
               WebkitOverflowScrolling: 'touch',
               marginBottom: SPACE.md,
+              cursor: 'grab',
+              userSelect: 'none',
+              willChange: 'scroll-position',
             }}
           >
             {currencies.map((c, i) => (
-              <div key={c} style={{ scrollSnapAlign: 'start' }}>
+              <div key={c} style={{ scrollSnapAlign: 'center', scrollSnapStop: 'always', flexShrink: 0 }}>
                 <HeroCard
                   currency={c}
                   balance={netWorth[c] ?? 0}
@@ -683,6 +748,7 @@ export default function Dashboard({ user }) {
               message={`Nothing recorded for ${filterLabel.toLowerCase()}`}
               action={() => openAddTransaction()}
               actionLabel="Add First Transaction"
+              accentColor={COLORS.blue}
             />
           ) : (
             <div>

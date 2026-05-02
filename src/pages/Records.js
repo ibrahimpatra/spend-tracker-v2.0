@@ -22,25 +22,35 @@ import { openAddTransaction } from '../components/Layout';
 
 // ─── Dimension definitions ────────────────────────────────────────────────────
 const DIMENSIONS = {
-  date:     { label: 'Date',     getValue: (t)       => t.dateObj?.toLocaleDateString('default', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' }) || '' },
-  month:    { label: 'Month',    getValue: (t)       => t.dateObj?.toLocaleString('default', { month: 'long', year: 'numeric' }) || '' },
-  account:  { label: 'Account',  getValue: (t, accs) => accs.find(a => a.id === t.accountId)?.name || 'Unknown' },
-  currency: { label: 'Currency', getValue: (t)       => t.currency || '' },
-  type:     { label: 'Type',     getValue: (t)       => t.type === 'income' ? 'Income' : ['transfer','out_transfer','in_transfer'].includes(t.type) ? 'Transfer' : 'Expense' },
+  date:     { label: 'Date',     getValue: (t)            => safeDate(t.dateObj).toLocaleDateString('default', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' }) },
+  month:    { label: 'Month',    getValue: (t)            => safeDate(t.dateObj).toLocaleString('default', { month: 'long', year: 'numeric' }) },
+  week:     { label: 'Week',     getValue: (t)            => { const d = safeDate(t.dateObj); const start = new Date(d); start.setDate(d.getDate() - d.getDay()); return 'Week of ' + start.toLocaleDateString('default', { month: 'short', day: 'numeric' }); } },
+  account:  { label: 'Account',  getValue: (t, accs)      => accs.find(a => a.id === t.accountId)?.name || 'Unknown' },
+  category: { label: 'Category', getValue: (t, _, cats)   => cats.find(c => c.id === t.categoryId)?.name || (t.type === 'income' ? 'Income' : ['transfer','out_transfer','in_transfer'].includes(t.type) ? 'Transfer' : 'Uncategorized') },
+  currency: { label: 'Currency', getValue: (t)            => t.currency || '' },
+  type:     { label: 'Type',     getValue: (t)            => t.type === 'income' ? 'Income' : ['transfer','out_transfer','in_transfer'].includes(t.type) ? 'Transfer' : 'Expense' },
+};
+
+const safeDate = (d) => {
+  if (!d) return new Date();
+  if (d instanceof Date) return d;
+  if (typeof d.toDate === 'function') return d.toDate();
+  if (typeof d.seconds === 'number') return new Date(d.seconds * 1000);
+  const p = new Date(d); return isNaN(p) ? new Date() : p;
 };
 
 // ─── Build group tree ─────────────────────────────────────────────────────────
-const buildGroups = (items, keys, accounts) => {
+const buildGroups = (items, keys, accounts, categories = []) => {
   if (!keys.length) return { isLeaf: true, items };
   const [head, ...tail] = keys;
   const map = new Map();
   items.forEach(t => {
-    const k = DIMENSIONS[head].getValue(t, accounts);
+    const k = DIMENSIONS[head].getValue(t, accounts, categories);
     if (!map.has(k)) map.set(k, []);
     map.get(k).push(t);
   });
   const children = [...map.entries()]
-    .map(([key, its]) => ({ key, ...buildGroups(its, tail, accounts), stats: calcStatsByCurrency(its), count: its.length }))
+    .map(([key, its]) => ({ key, ...buildGroups(its, tail, accounts, categories), stats: calcStatsByCurrency(its), count: its.length }))
     .sort((a, b) => b.key.localeCompare(a.key, undefined, { numeric: true }));
   return { isLeaf: false, children, stats: calcStatsByCurrency(items), count: items.length };
 };
@@ -85,7 +95,7 @@ function TxRow({ t, accounts, categories, indent = 0, index = 0 }) {
           display: 'flex', alignItems: 'center', gap: 4,
         }}>
           <span>
-            {t.dateObj?.toLocaleDateString('default', { month: 'short', day: 'numeric' })}
+            {safeDate(t.dateObj).toLocaleDateString('default', { month: 'short', day: 'numeric' })}
           </span>
           {acc && <><span>·</span><span style={{ textTransform: 'uppercase', fontSize: '10px', letterSpacing: '0.4px' }}>{acc.name}</span></>}
         </div>
@@ -354,7 +364,7 @@ export default function Records({ user }) {
 
   // ── grouped tree ──────────────────────────────────────────────────────────────
   const grouped = useMemo(
-    () => buildGroups(sortByDateDesc(filtered), grouping, accounts),
+    () => buildGroups(sortByDateDesc(filtered), grouping, accounts, categories),
     [filtered, grouping, accounts]
   );
 

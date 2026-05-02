@@ -69,7 +69,7 @@ function TxRow({ t, category, accounts, index }) {
           fontSize: FONT.caption1.size, color: COLORS.labelTertiary,
           fontFamily: FONT.family, marginTop: 2, display: 'flex', gap: 4,
         }}>
-          <span>{t.dateObj?.toLocaleDateString('default', { weekday: 'short', month: 'short', day: 'numeric' })}</span>
+          <span>{safeDate(t.dateObj).toLocaleDateString('default', { weekday: 'short', month: 'short', day: 'numeric' })}</span>
           {acc && <><span>·</span><span style={{ textTransform: 'uppercase', fontSize: '10px' }}>{acc.name}</span></>}
         </div>
       </div>
@@ -92,6 +92,16 @@ function TxRow({ t, category, accounts, index }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // CATEGORY DETAIL PAGE
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ─── Safe date helper ────────────────────────────────────────────────────────
+const safeDate = (d) => {
+  if (!d) return new Date();
+  if (d instanceof Date) return d;
+  if (typeof d.toDate === 'function') return d.toDate();
+  if (typeof d.seconds === 'number') return new Date(d.seconds * 1000);
+  const p = new Date(d); return isNaN(p) ? new Date() : p;
+};
+
 export default function CategoryDetail({ user }) {
   const { id }      = useParams();
   const navigate    = useNavigate();
@@ -142,10 +152,7 @@ export default function CategoryDetail({ user }) {
     const txForCurr = catTx.filter(t => t.currency === currency);
     const map = {};
     txForCurr.forEach(t => {
-      const d = t.dateObj instanceof Date
-        ? t.dateObj.toISOString().split('T')[0]
-        : '';
-      if (!d) return;
+      const d = safeDate(t.dateObj).toISOString().split('T')[0];
       if (!map[d]) map[d] = 0;
       map[d] += t.amount || 0;
     });
@@ -298,7 +305,7 @@ export default function CategoryDetail({ user }) {
                     content={({ active, payload, label }) => {
                       if (!active || !payload?.length) return null;
                       return (
-                        <div style={{ background: 'rgba(28,28,30,0.92)', borderRadius: RADIUS.lg, padding: '10px 14px', boxShadow: SHADOW.lg }}>
+                        <div style={{ background: 'var(--mv6-surface-overlay, rgba(28,28,30,0.92))', borderRadius: RADIUS.lg, padding: '10px 14px', boxShadow: SHADOW.lg }}>
                           <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)', fontFamily: FONT.family, marginBottom: 4 }}>{label}</div>
                           <div style={{ fontSize: '13px', fontWeight: 600, color: accentColor, fontFamily: FONT.family }}>
                             {formatAmount(payload[0].value, currency)} {currency}

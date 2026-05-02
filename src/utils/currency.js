@@ -5,6 +5,16 @@
 
 import { getCurrencyMeta, isIncomeType, isExpenseType, isTransferType } from '../constants';
 
+// Safe date conversion — handles: Date, Firestore Timestamp, JSON POJO {seconds}, string
+const tsToDate = (d) => {
+  if (!d) return new Date();
+  if (d instanceof Date) return d;
+  if (typeof d.toDate === 'function') return d.toDate();
+  if (typeof d.seconds === 'number') return new Date(d.seconds * 1000);
+  const p = new Date(d);
+  return isNaN(p) ? new Date() : p;
+};
+
 // ─── Format a single amount ────────────────────────────────────────────────────
 export const formatAmount = (amount, currencyCode, opts = {}) => {
   const num = typeof amount === 'number' ? amount : parseFloat(amount) || 0;
@@ -73,9 +83,7 @@ export const buildDailyTimeSeries = (transactions = [], currency) => {
   const map = {};
 
   filtered.forEach(t => {
-    const d = t.dateObj instanceof Date
-      ? t.dateObj.toISOString().split('T')[0]
-      : new Date(t.date?.seconds * 1000).toISOString().split('T')[0];
+    const d = tsToDate(t.dateObj).toISOString().split('T')[0];
     if (!map[d]) map[d] = { date: d, income: 0, expense: 0, net: 0 };
     if (isIncomeType(t.type))        map[d].income  += t.amount || 0;
     else if (isExpenseType(t.type))  map[d].expense += t.amount || 0;
@@ -92,9 +100,7 @@ export const buildMonthlyTimeSeries = (transactions = [], currency) => {
   const map = {};
 
   filtered.forEach(t => {
-    const dateObj = t.dateObj instanceof Date
-      ? t.dateObj
-      : new Date(t.date?.seconds * 1000);
+    const dateObj = tsToDate(t.dateObj);
     const key   = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`;
     const label = dateObj.toLocaleString('default', { month: 'short', year: '2-digit' });
     if (!map[key]) map[key] = { month: key, label, income: 0, expense: 0, net: 0 };
@@ -139,8 +145,8 @@ export const buildCategoryBreakdown = (transactions = [], categories = [], curre
 export const buildRunningBalance = (transactions = [], openingBalance = 0) => {
   let balance = openingBalance;
   const sorted = [...transactions].sort((a, b) => {
-    const da = a.dateObj instanceof Date ? a.dateObj : new Date(a.date?.seconds * 1000);
-    const db = b.dateObj instanceof Date ? b.dateObj : new Date(b.date?.seconds * 1000);
+    const da = tsToDate(a.dateObj);
+    const db = tsToDate(b.dateObj);
     return da - db;
   });
 
@@ -172,8 +178,8 @@ export const formatTrend = (pct) => {
 // ─── Sorting helpers ──────────────────────────────────────────────────────────
 export const sortByDateDesc = (transactions) =>
   [...transactions].sort((a, b) => {
-    const da = a.dateObj instanceof Date ? a.dateObj : new Date(a.date?.seconds * 1000);
-    const db = b.dateObj instanceof Date ? b.dateObj : new Date(b.date?.seconds * 1000);
+    const da = tsToDate(a.dateObj);
+    const db = tsToDate(b.dateObj);
     return db - da;
   });
 
